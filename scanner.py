@@ -1,4 +1,8 @@
-"""종베 스캐너 v4.1: 전종목 종가 스캔 (FinanceData/marcap 연도별 Parquet).
+"""종베 스캐너 v4.2: 기준일 검증 + 업스트림 지연 명시.
+
+FinanceData/marcap 공개 일봉 데이터는 당일 종가가 늦게 반영될 수 있습니다.
+거래소 XKRX 거래일 캘린더 기준의 기대 기준일과 원본 최신 거래일을
+비교하고 늦으면 공개 데이터의 지연 사실을 결과에 명시합니다.
 
 KRX/pykrx 원격 조회가 21일 중 0일 성공하던 문제를 회피하기 위해,
 GitHub에 공개된 연도별 한국 주식 마감 OHLCV 스냅샷을 내려받습니다.
@@ -18,24 +22,40 @@ from zoneinfo import ZoneInfo
 
 import pandas as pd
 import requests
+import exchange_calendars as xcals
 
 ROOT = Path(__file__).resolve().parent
 OUT = ROOT / 'results.json'
 KST = ZoneInfo('Asia/Seoul')
 HISTORY_DAYS = 21
-MAX_STALE_CALENDAR_DAYS = 9
+MAX_STALE_CALENDAR_DAYS = 12
+MAX_LAG_SESSIONS = 5  # 소스가 이보다 오래됐으면 배포 중지
 DATA_URL = 'https://raw.githubusercontent.com/FinanceData/marcap/master/data/marcap-{year}.parquet'
 MARKET_MIN = {'KOSPI': 400, 'KOSDAQ': 500}
 log = logging.getLogger('jongbe')
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
 
 
-def last_eligible_date(now: dt.datetime) -> dt.date:
+def expected_trading_date(now: dt.datetime) -> dt.date:
+    """마감 확정 전(16:30 KST)엔 이전 거래일, 이후엔 당일 거래일.
+
+    주말 및 거래소 공식 휴장일은 XKRX 거래일 달력에 따라 건너뜁니다.
+    """
     local = now.astimezone(KST)
     day = local.date()
     if local.time() < dt.time(16, 30):
         day -= dt.timedelta(days=1)
-    return day
+    calendar = xcals.get_calendar('XKRX')
+    return calendar.date_to_session(pd.Timestamp(day), direction='previous').date()
+
+
+def trading_day_gap(actual: dt.date, expected: dt.date) -> int:
+    """실제 분석일 이후 ~ 기준 거래일까지 빠진 *거래일* 개수."""
+    if actual >= expected:
+        return 0
+    calendar = xcals.get_calendar('XKRX')
+    return len(calendar.sessions_in_range(pd.Timestamp(actual) + pd.Timedelta(days=1),
+                                          pd.Timestamp(expected)))
 
 
 def download_year(year: int) -> pd.DataFrame:
@@ -44,7 +64,10 @@ def download_year(year: int) -> pd.DataFrame:
     for attempt in range(3):
         try:
             log.info('시세 원본 다운로드 시작: %s', url)
-            r = requests.get(url, timeout=(15, 100), headers={'User-Agent':'jongbe-scanner/4.1 (educational github action)'})
+            r = requests.get(url + f'?t={int(time.time())}', timeout=(15, 100), headers={
+                'User-Agent':'jongbe-scanner/4.2 (educational github action)',
+                'Cache-Control':'no-cache',
+            })
             r.raise_for_status()
             if len(r.content) < 1_000_000:
                 raise ValueError(f'원본이 비정상적으로 작음: {len(r.content)} bytes')
@@ -94,7 +117,9 @@ def get_data(reference: dt.date) -> pd.DataFrame:
     if len(good_dates) < HISTORY_DAYS:
         raise RuntimeError(f'전체 시장 데이터 {HISTORY_DAYS}일 필요, 정상 거래일 {len(good_dates)}일만 확보. 이전 배포 유지.')
     filtered = df[df['Date'].isin(good_dates)]
-    log.info('사용 기준일 %s, 거래일 %s일, 최근 종목 %s개', latest, len(good_dates), len(filtered[filtered['Date']==max(good_dates)]))
+    log.info('원본 최신 %s / 채택 기준일 %s / 거래일 %s일 / 최근 종목 %s개',
+             latest, max(good_dates).date(), len(good_dates),
+             len(filtered[filtered['Date']==max(good_dates)]))
     return filtered
 
 
@@ -146,8 +171,8 @@ def analyze(df: pd.DataFrame, now: dt.datetime) -> dict:
     rows.sort(key=lambda x:(-x['score'],-x['value_eok'],x['code']))
     return {
         'asof':latest_date,'updated':now.strftime('%Y-%m-%d %H:%M KST'),
-        'version':4, 'source':'FinanceData/marcap',
-        'universe_size':int(len(df[df['Date']==df['Date'].max()])),
+        'version':4, 'minor_version':'4.2', 'source':'FinanceData/marcap',
+        'universe_size':int(len(latest)),
         'analyzed_count':len(rows),'history_days':HISTORY_DAYS,'rows':rows,
         'notice':'서드파티 공개 KRX 데이터셋 기반의 장 마감 후 분석. 실시간 시세 아님. 점수는 상승 확률 아님.'
     }
@@ -155,13 +180,28 @@ def analyze(df: pd.DataFrame, now: dt.datetime) -> dict:
 
 def main():
     now = dt.datetime.now(KST)
-    reference=last_eligible_date(now)
+    reference=expected_trading_date(now)
     data=get_data(reference)
     result=analyze(data,now)
+    actual=dt.date.fromisoformat(result['asof'])
+    lag=trading_day_gap(actual,reference)
+    if lag > MAX_LAG_SESSIONS:
+        raise RuntimeError(f'마지막 데이터 {actual}가 기대 거래일 {reference}보다 {lag}거래일 늦습니다. 기존 배포 유지.')
+    result.update({
+        'expected_asof':reference.isoformat(),
+        'lag_sessions':lag,
+        'data_status':'delayed' if lag else 'current',
+        'freshness_message':(
+            f'원본 제공이 {lag}거래일 지연됨. {actual} 기준 과거 기록이며 당일 종가매매 판단에 사용 금지.'
+            if lag else '현재 확인 가능한 최근 마감 거래일 데이터셋이 반영됨.'
+        ),
+    })
+    if lag:
+        log.warning('주의: %s (기대 거래일 %s)',result['freshness_message'],reference)
     tmp=OUT.with_suffix('.json.tmp')
     tmp.write_text(json.dumps(result,ensure_ascii=False,separators=(',',':'))+'\n',encoding='utf-8')
     os.replace(tmp,OUT)
-    log.info('분석 성공: 원천 %s 기준일=%s 전체=%d 분석유효=%d',
+    log.info('분석 완료: 원천 %s 기준일=%s 전체=%d 분석유효=%d',
              result['source'],result['asof'],result['universe_size'],result['analyzed_count'])
     for item in result['rows'][:10]:
         log.info('후보 %s (%s), %s점',item['name'],item['code'],item['score'])

@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="theme-color" content="#101827">
-  <title>종베 스캐너 v4 | 코스피·코스닥 전종목</title>
+  <title>종베 스캐너 v4.2 | 코스피·코스닥 전종목</title>
   <style>
     :root{color-scheme:dark}*{box-sizing:border-box}
     body{margin:0;background:#101827;color:#f3f6fe;font-family:system-ui,-apple-system,"Noto Sans KR",sans-serif}
@@ -18,6 +18,8 @@
     .badge{display:inline-block;background:#443316;color:#ffe0a1;border-radius:9px;padding:9px 12px;font-weight:700;font-size:14px}
     .meta{margin:17px 0;background:#1b2940;border:1px solid #344866;border-radius:12px;padding:14px;color:#cedaeb;line-height:1.6}
     .bar{display:flex;align-items:center;gap:11px;flex-wrap:wrap;margin:15px 0}
+    .fresh-alert{margin:12px 0 18px;padding:15px 16px;border:2px solid #e2ab4e;background:#3f301b;border-radius:11px;color:#ffe5af;font-weight:750;line-height:1.65}
+    .fresh-alert[hidden]{display:none}
     .filters{border:1px solid #2c3c55;background:#151f32;border-radius:13px;padding:14px;margin:12px 0 22px;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:13px}
     .full{grid-column:1/-1}.titlebar{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:20px 0 12px}
     .card{border:1px solid #344866;background:#1b2940;border-radius:15px;padding:17px;margin-bottom:12px}
@@ -32,11 +34,12 @@
   </style>
 </head>
 <body><main>
-  <h1>📈 종베 스캐너 <small>v4</small></h1>
+  <h1>📈 종베 스캐너 <small>v4.2</small></h1>
   <div class="badge">⚠️ 장 마감 후 확정 일봉 · 실시간 아님</div>
-  <p>코스피·코스닥 전체 주식 종목의 일봉을 검토하고 기술 조건을 점수화합니다. <b>점수는 상승 확률이나 매수 추천이 아닙니다.</b></p>
-  <div class="bar"><button id="refresh" type="button">결과 새로고침</button><small>평일 16:45(KST) 자동 실행 예약 · 지연/실패 가능</small></div>
+  <p>코스피·코스닥 전체 주식 종목의 공개 일봉을 검토하고 기술 조건을 점수화합니다. <b>점수는 상승 확률이나 매수 추천이 아닙니다.</b></p>
+  <div class="bar"><button id="refresh" type="button">결과 새로고침</button><small>평일 18:15 및 월~토 09:30(KST) 재확인 예약 · 지연/실패 가능</small></div>
   <div class="meta" id="status" role="status" aria-live="polite">분석 데이터 확인 중...</div>
+  <div class="fresh-alert" id="freshness" role="alert" hidden></div>
   <section class="filters" aria-label="검색 조건">
     <label class="full">종목 검색 (이름 또는 코드)<input id="query" type="search" placeholder="예: 삼성전자, 005930" autocomplete="off"></label>
     <label>시장<select id="market"><option value="ALL">코스피 + 코스닥</option><option value="KOSPI">코스피</option><option value="KOSDAQ">코스닥</option></select></label>
@@ -49,7 +52,7 @@
   <div class="titlebar"><h2>조건 검색 결과</h2><small id="counter">0개</small></div>
   <section id="results" aria-label="종목 검색 결과"></section>
   <div class="pager"><button id="more" type="button" hidden>20개 더 보기</button></div>
-  <p class="rules">점수 기준: 종가&gt;5일 평균선 +25점, 5일선&gt;20일선 +25점, 거래량&gt;이전 20거래일 평균의 1.5배 +20점, 당일 고저가 대비 종가 위치≥75% +20점, 당일 등락률 양수 +10점. 최대 100점. <b>거래대금은 KRX에서 제공한 실제 누적 거래대금</b>을 사용합니다. 거래정지·신규 상장 등 21거래일 자료가 불완전한 종목은 점수 계산에서 제외합니다. 우선주·스팩 등도 포함될 수 있습니다. 외국인·기관·프로그램 매매 분석 및 14:30 장중 실시간 검색은 제공하지 않습니다. KRX 무료 조회가 차단/변경되면 자동 실행이 실패할 수 있으며 이전 정상 배포가 남을 수 있으므로 기준일을 확인하세요.</p>
+  <p class="rules">점수 기준: 종가&gt;5일 평균선 +25점, 5일선&gt;20일선 +25점, 거래량&gt;이전 20거래일 평균의 1.5배 +20점, 당일 고저가 대비 종가 위치≥75% +20점, 당일 등락률 양수 +10점. 최대 100점. <b>거래대금은 KRX에서 제공한 실제 누적 거래대금</b>을 사용합니다. 거래정지·신규 상장 등 21거래일 자료가 불완전한 종목은 점수 계산에서 제외합니다. 우선주·스팩 등도 포함될 수 있습니다. 외국인·기관·프로그램 매매 분석 및 14:30 장중 실시간 검색은 제공하지 않습니다. FinanceData/marcap 원본은 갱신이 늦어질 수 있습니다. 화면의 <b>기준일과 기대 거래일</b>을 반드시 확인하세요. 최신 시세가 없을 때 표시되는 종목은 과거 기록입니다.</p>
 </main>
 <script>
 'use strict';
@@ -100,11 +103,16 @@ async function load(){
     const d=await r.json();
     if(!Array.isArray(d.rows))throw Error('데이터 형식이 올바르지 않습니다.');
     dataRows=d.rows;infoDate=d.asof||'-';countShown=20;
-    const date=new Date(infoDate+'T12:00:00+09:00');const age=Math.floor((Date.now()-date.getTime())/86400000);
-    const stale=Number.isFinite(age)&&age>=4?` ⚠️ 기준일 ${age}일 전 (휴장·갱신 지연 여부 확인)` : '';
-    const note=d.version===4?'': ' ⚠️ 아직 v4 결과가 아닙니다. Actions를 새로 실행하세요.';
-    text($('status'),`기준일 ${infoDate} · 갱신 ${d.updated||'-'} · 전체 ${fmt(d.universe_size||0)}종목 / 분석 유효 ${fmt(d.analyzed_count||0)}종목${stale}${note}`);
-  }catch(e){dataRows=[];text($('status'),'⚠️ 분석 데이터를 읽지 못했습니다: '+e.message);}
+    const expected=d.expected_asof||'-';
+    const lag=Number(d.lag_sessions||0);
+    const stale=d.data_status==='delayed' || (expected!=='-' && infoDate<expected);
+    const banner=$('freshness');banner.hidden=!stale;
+    if(stale){
+      text(banner,`⚠️ 최신 거래일 데이터 지연! 기대 거래일 ${expected}, 확보된 데이터 ${infoDate} (${lag}거래일 지연). 이 목록은 과거 종목 분석입니다. 오늘 장 마감 매수 판단에 사용하지 마세요.`);
+    }
+    const note=d.minor_version==='4.2'?'':' ⚠️ 신규 기준일 검증 정보가 없습니다. 자동 분석을 다시 실행하세요.';
+    text($('status'),`데이터 기준일 ${infoDate} · 기대 거래일 ${expected} · 갱신 작업 ${d.updated||'-'} · 전체 ${fmt(d.universe_size||0)}종목 / 분석 유효 ${fmt(d.analyzed_count||0)}종목${note}`);
+  }catch(e){dataRows=[];$('freshness').hidden=false;text($('freshness'),'⚠️ 분석 결과를 읽지 못했습니다. GitHub Actions 실행 상태를 확인하세요.');text($('status'),'⚠️ 분석 데이터를 읽지 못했습니다: '+e.message);}
   finally{$('refresh').disabled=false;display();}
 }
 ['query','market','minscore','minvalue','change','sort','position'].forEach(id=>
