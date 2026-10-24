@@ -1,0 +1,60 @@
+name: Namuh PLUG stock price test
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test-quote:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install NHPLUG official Python SDK
+        run: python -m pip install --disable-pip-version-check nhplug
+
+      - name: Read-only Samsung Electronics quote test
+        env:
+          NHPLUG_APP_KEY: ${{ secrets.NAMUH_APP_KEY }}
+          NHPLUG_APP_SECRET: ${{ secrets.NAMUH_APP_SECRET_KEY }}
+          NHPLUG_BASE_URL: https://api.nhplug.com:8443
+          NHPLUG_AUTH_URL: https://api.nhplug.com:8443
+        run: |
+          python - <<'PY'
+          import os
+          import sys
+
+          # The app keys must never be hard-coded or printed.
+          if not os.environ.get('NHPLUG_APP_KEY') or not os.environ.get('NHPLUG_APP_SECRET'):
+              print('FAILED: Required GitHub Actions secrets are missing.')
+              sys.exit(1)
+
+          try:
+              from nhplug import call
+              response = call('/krstock/quote/v1/currentPrice', {
+                  'iem_cd': '005930',
+                  'market_cd': 'KRX',
+              })
+              # HTTP 200 alone does not guarantee an actual quote was returned.
+              # In particular, the server may return an error envelope.
+              if not isinstance(response, dict):
+                  raise ValueError('Expected a response object')
+              output = response.get('Output_0') or {}
+              price = output.get('stck_prpr') if isinstance(output, dict) else None
+              if price in (None, ''):
+                  raise ValueError('No price in Output_0.stck_prpr')
+          except Exception as error:
+              # Avoid logging full exception messages/URLs/headers/tokens.
+              print('FAILED: Stock price inquiry (' + type(error).__name__ + ').')
+              sys.exit(1)
+
+          print('SUCCESS: Samsung Electronics (005930) price API returned a quote.')
+          print('Returned price (KRW):', price)
+          print('Note: On weekends and outside trading hours the result is not a live tick.')
+          PY
