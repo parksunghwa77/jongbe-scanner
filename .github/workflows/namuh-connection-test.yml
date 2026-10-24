@@ -1,0 +1,71 @@
+name: Namuh PLUG connection test
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check-credentials:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Verify token issuance without exposing credentials
+        env:
+          NAMUH_APP_KEY: ${{ secrets.NAMUH_APP_KEY }}
+          NAMUH_APP_SECRET_KEY: ${{ secrets.NAMUH_APP_SECRET_KEY }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          import sys
+          from urllib.error import HTTPError, URLError
+          from urllib.parse import urlencode
+          from urllib.request import Request, urlopen
+
+          app_key = os.environ.get('NAMUH_APP_KEY', '')
+          app_secret = os.environ.get('NAMUH_APP_SECRET_KEY', '')
+          if not (app_key and app_secret):
+              print('FAILED: One or both GitHub Secrets are missing or empty.')
+              sys.exit(1)
+
+          params = urlencode({
+              'appkey': app_key,
+              'appsecretkey': app_secret,
+              'grant_type': 'client_credentials',
+              'scope': 'oob',
+          })
+          # Follow the official NH PLUG SDK: POST with URL query parameters.
+          # Never print the request URL or server response: they may contain secrets.
+          request = Request(
+              'https://api.nhplug.com:8443/oauth2/token?' + params,
+              data=b'',
+              method='POST',
+              headers={'Content-Type': 'application/x-www-form-urlencoded'},
+          )
+          try:
+              with urlopen(request, timeout=20) as response:
+                  status = response.status
+                  result = json.loads(response.read().decode('utf-8'))
+          except HTTPError as error:
+              print(f'FAILED: Authentication server returned HTTP {error.code}.')
+              sys.exit(1)
+          except URLError:
+              print('FAILED: Could not connect to the authentication server.')
+              sys.exit(1)
+          except Exception as error:
+              print(f'FAILED: {type(error).__name__} while reading authentication response.')
+              sys.exit(1)
+
+          if status == 200 and isinstance(result, dict) and result.get('access_token'):
+              print('SUCCESS: Namuh PLUG access token issued. Token is not displayed or saved.')
+          else:
+              print('FAILED: No access token found in authentication response.')
+              sys.exit(1)
+          PY
