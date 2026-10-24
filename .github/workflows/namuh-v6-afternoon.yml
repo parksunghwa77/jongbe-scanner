@@ -1,4 +1,4 @@
-name: 종베 스캐너 v6 - 오후 2시 30분 관심종목 관찰
+name: 종베 스캐너 v6.1 - 오후 2시 30분 관심종목 관찰
 
 # 기존 scanner.yml / GitHub Pages 배포에는 영향 없음.
 on:
@@ -73,39 +73,88 @@ jobs:
               return int(x) if x is not None else None
 
 
-          def candidates(now):
-              """최근 v5 일봉 점수표의 상위 종목 + 관심종목. 원본이 오래되면 무시."""
-              result = list(DEFAULT)
-              path = Path("results.json")
-              used = "기본 관심종목"
-              if path.exists():
+          V5_PUBLISHED_JSON = "https://parksunghwa77.github.io/jongbe-scanner/results.json"
+
+
+          def read_v5_candidates(now):
+              """v5 published results take priority; repository root file may be a placeholder.
+
+              Only public published data is fetched. No API key is sent to this URL.
+              If live Pages output is unavailable or stale, try local results.json.
+              """
+              from urllib.request import Request, urlopen
+              from urllib.error import HTTPError, URLError
+
+              sources = (
+                  ("GitHub Pages에 게시된 v5 결과", "published"),
+                  ("GitHub 저장소의 v5 결과", "local"),
+              )
+              for label, mode in sources:
                   try:
-                      obj = json.loads(path.read_text(encoding="utf-8"))
-                      asof = date.fromisoformat(obj.get("asof", ""))
-                      age = (now.date() - asof).days
-                      if 0 <= age <= MAX_SOURCE_AGE_DAYS:
-                          for item in (obj.get("rows") or [])[:300]:
-                              code = str(item.get("code", "")).zfill(6)
-                              name = str(item.get("name", code))[:24]
-                              if (re.fullmatch(r"\d{6}", code) and
-                                      item.get("score", 0) >= 50):
-                                  result.append((code, name))
-                              if len({x[0] for x in result}) >= MAX_CODES:
-                                  break
-                          used = f"기본 관심종목 + v5 일봉 후보({asof}; 분석 종목 제한)"
+                      if mode == "published":
+                          req = Request(V5_PUBLISHED_JSON, headers={
+                              "User-Agent": "jongbe-scanner-v6.1-readonly/1.0",
+                              "Cache-Control": "no-cache",
+                          })
+                          with urlopen(req, timeout=12) as f:
+                              blob = f.read(10_000_001)
+                          if len(blob) > 10_000_000:
+                              continue
+                          obj = json.loads(blob.decode("utf-8"))
                       else:
-                          used = f"기본 관심종목만 (v5 일봉 {asof} 오래됨)"
-                  except (OSError, ValueError, TypeError, AttributeError, KeyError):
-                      used = "기본 관심종목만 (v5 결과 읽기 실패)"
-              seen = set()
+                          path = Path("results.json")
+                          if not path.is_file():
+                              continue
+                          obj = json.loads(path.read_text(encoding="utf-8"))
+                      if not isinstance(obj, dict):
+                          continue
+                      asof_str = obj.get("asof")
+                      if not isinstance(asof_str, str):
+                          continue  # e.g., repository placeholder has asof:null
+                      asof = date.fromisoformat(asof_str)
+                      age = (now.date() - asof).days
+                      rows = obj.get("rows")
+                      if not (0 <= age <= MAX_SOURCE_AGE_DAYS and
+                              isinstance(rows, list) and rows):
+                          continue
+                      return rows, asof, label
+                  except (OSError, ValueError, TypeError, UnicodeError, HTTPError, URLError):
+                      # A data source failure must not prevent read-only base watchlist scan.
+                      continue
+              return [], None, "기본 관심종목만 (v5 공개 데이터 확보 실패 또는 기준일 초과)"
+
+
+          def candidates(now):
+              """Use published v5 shortlist + base watchlist; limit API calls to 55 codes."""
+              result = list(DEFAULT)
+              v5_rows, asof, source_label = read_v5_candidates(now)
+              accepted = 0
+              for item in v5_rows:
+                  if not isinstance(item, dict):
+                      continue
+                  code = str(item.get("code", "")).strip().zfill(6)
+                  name = str(item.get("name") or code)[:24]
+                  score = number(item.get("score"))
+                  if (re.fullmatch(r"\d{6}", code) and
+                          score is not None and score >= Decimal("50")):
+                      result.append((code, name))
+                      accepted += 1
+                  if len({x[0] for x in result}) >= MAX_CODES:
+                      break
               uniq = []
+              seen = set()
               for code, name in result:
                   if code not in seen:
                       seen.add(code)
                       uniq.append((code, name))
                   if len(uniq) == MAX_CODES:
                       break
-              return uniq, used
+              if asof is not None:
+                  source = (f"기본 관심종목 + {source_label} "
+                            f"({asof}; v5에서 {accepted}개 후보 추가, 최대 {MAX_CODES}종목)")
+              else:
+                  source = source_label
+              return uniq, source
 
 
           def market_session(now):
