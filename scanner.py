@@ -155,9 +155,16 @@ def analyze(df: pd.DataFrame, now: dt.datetime) -> dict:
         raise RuntimeError(f'21거래일 분석에 적합한 종목이 {len(latest)}개뿐임. 이전 배포 유지.')
     ma5=close.iloc[:,-5:].mean(axis=1)
     ma20=close.iloc[:,-20:].mean(axis=1)
+    # 골든크로스는 당일의 정배열 여부와 달리 반드시 직전 거래일 5·20일선을 비교해야 한다.
+    # 오늘 일봉을 제외하고 각각 지난 5일/20일 종가를 산출한다 (미래 정보 사용 금지).
+    ma5_prev=close.iloc[:,-6:-1].mean(axis=1)
+    ma20_prev=close.iloc[:,-21:-1].mean(axis=1)
+    golden_cross=(ma5_prev<=ma20_prev)&(ma5>ma20)
     # 200거래일 종가가 모두 존재하고 양수인 경우에만 MA200을 계산.
     closes200 = close.iloc[:, -200:]
     ma200 = closes200.where(closes200 > 0).mean(axis=1, skipna=False)
+    # 5일선 > 20일선 > 200일선: 데이터 200일이 완전할 때만 판정.
+    ma_aligned=((ma5>ma20)&(ma20>ma200)).fillna(False)
     # 이전 v5에서는 55일 창의 당일을 제외한 54거래일 평균거래량을 썼음.
     # 새로운 200일 데이터 확보 때문에 기존 점수가 바뀌지 않도록 그 창을 고정.
     prev_volume=volume.iloc[:, -REQUIRED_VALID_DAYS:-1].mean(axis=1)
@@ -178,6 +185,8 @@ def analyze(df: pd.DataFrame, now: dt.datetime) -> dict:
             'close_position':round(float(pos.loc[code]),1),'volume_ratio':round(float(ratio.loc[code]),2),
             'ma5':round(float(ma5.loc[code]),2), 'ma20':round(float(ma20.loc[code]),2),
             'ma200':round(float(ma200.loc[code]),2) if pd.notna(ma200.loc[code]) else None,
+            'ma_aligned':bool(ma_aligned.loc[code]),
+            'golden_cross':bool(golden_cross.loc[code]),
             'score':int(score.loc[code]),
             'watch':bool(score.loc[code]>=70 and float(r['거래대금'])>=1e10 and 0<float(change.loc[code])<=15 and float(pos.loc[code])>=60),
             'chase_risk':bool(float(change.loc[code])>=15)
@@ -190,6 +199,8 @@ def analyze(df: pd.DataFrame, now: dt.datetime) -> dict:
         'version':5, 'minor_version':'5.0', 'source':'FinanceData/marcap',
         'universe_size':int(len(latest)),
         'ma200_count':int(ma200.notna().sum()),
+        'ma_alignment_count':int(ma_aligned.sum()),
+        'golden_cross_count':int(golden_cross.sum()),
         'analyzed_count':len(rows),'history_days':HISTORY_DAYS,'rows':rows,
         'notice':'서드파티 공개 KRX 데이터셋 기반의 장 마감 후 분석. 실시간 시세 아님. 점수는 상승 확률 아님.'
     }
