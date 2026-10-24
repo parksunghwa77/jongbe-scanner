@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="theme-color" content="#101827">
-  <title>종베 스캐너 v5 | 코스피·코스닥 전종목</title>
+  <title>종베 스캐너 v5.1 | 코스피·코스닥 전종목</title>
   <style>
     :root{color-scheme:dark}*{box-sizing:border-box}
     body{margin:0;background:#101827;color:#f3f6fe;font-family:system-ui,-apple-system,"Noto Sans KR",sans-serif}
@@ -35,12 +35,18 @@
     .history{width:100%;border-collapse:collapse;font-size:12px;margin-top:11px}
     .history th,.history td{border-bottom:1px solid #36475e;padding:8px 3px;text-align:left}
     .alertpill{font-size:11px;background:#66412a;color:#ffe7ba;border-radius:5px;padding:3px 6px;margin-left:6px}
+    .searchblock{display:flex;flex-direction:column;gap:7px}
+    .searchblock>label{display:block}
+    .searchrow{display:flex;gap:8px}
+    .searchrow>input{flex:1;min-width:0}
+    .searchrow>button{flex-shrink:0}
+    .searchhint{font-weight:500;color:#b4d4ff;line-height:1.55}
     .pager{display:flex;justify-content:center;margin:15px 0}.empty{padding:20px 6px}
     @media(min-width:620px){.filters{grid-template-columns:repeat(4,minmax(0,1fr))}.full{grid-column:span 2}}
   </style>
 </head>
 <body><main>
-  <h1>📈 종베 스캐너 <small>v5</small></h1>
+  <h1>📈 종베 스캐너 <small>v5.1</small></h1>
   <div class="badge">⚠️ 장 마감 후 확정 일봉 · 실시간 아님</div>
   <p>코스피·코스닥 공개 일봉을 평가하고 과거 후보의 다음 거래일 변화를 함께 검증합니다. <b>점수는 상승 확률이나 매수 추천이 아닙니다.</b></p>
   <div class="bar"><button id="refresh" type="button">결과 새로고침</button><small>평일 18:15 및 월~토 09:30(KST) 재확인 예약 · 지연/실패 가능</small></div>
@@ -48,7 +54,10 @@
   <div class="fresh-alert" id="freshness" role="alert" hidden></div>
   <section class="performance" aria-label="과거 종목 관찰 성과" id="backtest"><h2>과거 관찰 조건 검증</h2><p>분석 결과를 불러오는 중...</p></section>
   <section class="filters" aria-label="검색 조건">
-    <label class="full">종목 검색 (이름 또는 코드)<input id="query" type="search" placeholder="예: 삼성전자, 005930" autocomplete="off"></label>
+    <div class="full searchblock"><label for="query">종목 검색 (이름 또는 코드)</label>
+      <div class="searchrow"><input id="query" type="search" placeholder="예: 삼성전자, 005930" autocomplete="off" enterkeyhint="search"><button id="findstock" type="button">검색</button></div>
+      <small id="searchhint" class="searchhint" aria-live="polite">종목명을 입력하면 점수·거래대금 등 다른 필터와 관계없이 전체 분석 종목에서 검색합니다.</small>
+    </div>
     <label>관찰 조건<select id="viewmode"><option value="all">전체 (기존 필터)</option><option value="watch">관찰 후보만 · 추격 급등 제외</option></select></label>
     <label>시장<select id="market"><option value="ALL">코스피 + 코스닥</option><option value="KOSPI">코스피</option><option value="KOSDAQ">코스닥</option></select></label>
     <label>최소 점수<select id="minscore"><option value="0">0점 이상</option><option value="40" selected>40점 이상</option><option value="60">60점 이상</option><option value="80">80점 이상</option></select></label>
@@ -86,23 +95,46 @@ function displayBacktest(bt){
   table.append(body);box.append(table);
 }
 function display(){
-  const query=$('query').value.trim().toLowerCase();
+  // 개별 종목 검색은 조건 스캐너 필터와 분리한다. (예: 삼성전자 0점도 검색됨)
+  const normalize = s => String(s??'').normalize('NFKC').toLowerCase().replace(/\s+/g,'');
+  const query=normalize($('query').value);
+  const searching=query.length>0;
   const market=$('market').value;
   const minscore=Number($('minscore').value), minvalue=Number($('minvalue').value), minpos=Number($('position').value);
   const up=$('change').value === 'up', order=$('sort').value, watchOnly=$('viewmode').value==='watch';
-  const candidates=dataRows.filter(x=>
-    (!query || String(x.name||'').toLowerCase().includes(query) || String(x.code||'').includes(query)) &&
-    (market === 'ALL' || x.market === market) && (!watchOnly || x.watch === true) && Number(x.score)>=minscore &&
-    Number(x.value_eok)>=minvalue && Number(x.close_position)>=minpos && (!up || Number(x.change)>0)
-  );
-  if(order==='value') candidates.sort((a,b)=>b.value_eok-a.value_eok||b.score-a.score);
-  if(order==='volume') candidates.sort((a,b)=>b.volume_ratio-a.volume_ratio||b.score-a.score);
-  if(order==='change') candidates.sort((a,b)=>b.change-a.change||b.score-a.score);
-  if(order==='score') candidates.sort((a,b)=>b.score-a.score||b.value_eok-a.value_eok);
+  const candidates=dataRows.filter(x=>{
+    if(searching){
+      // 검색어를 입력하면 다른 조건(시장, 점수, 거래대금, 상승/하락, 종가위치 등)을 무시
+      return normalize(x.name).includes(query) || normalize(x.code).includes(query);
+    }
+    return (market === 'ALL' || x.market === market) && (!watchOnly || x.watch === true) &&
+      Number(x.score)>=minscore && Number(x.value_eok)>=minvalue &&
+      Number(x.close_position)>=minpos && (!up || Number(x.change)>0);
+  });
+  if(searching){
+    const relevance = x => {
+      const n=normalize(x.name), c=normalize(x.code);
+      return n===query||c===query?0:(n.startsWith(query)||c.startsWith(query)?1:2);
+    };
+    candidates.sort((a,b)=>relevance(a)-relevance(b)||Number(b.score)-Number(a.score)||Number(b.value_eok)-Number(a.value_eok));
+  }else{
+    if(order==='value') candidates.sort((a,b)=>b.value_eok-a.value_eok||b.score-a.score);
+    if(order==='volume') candidates.sort((a,b)=>b.volume_ratio-a.volume_ratio||b.score-a.score);
+    if(order==='change') candidates.sort((a,b)=>b.change-a.change||b.score-a.score);
+    if(order==='score') candidates.sort((a,b)=>b.score-a.score||b.value_eok-a.value_eok);
+  }
+  const searchhint=$('searchhint');
+  if(searching){
+    const names=candidates.slice(0,3).map(x=>`${x.name}(${x.code})`).join(', ');
+    text(searchhint,candidates.length?`🔎 ${fmt(candidates.length)}개 검색됨: ${names}${candidates.length>3?' 외':''} · 다른 조건 무시`:
+      '🔎 검색 결과 없음. 전체 상장종목 중 분석 데이터가 부족해 제외된 종목도 있습니다.');
+  }else{
+    text(searchhint,'종목명을 입력하면 점수·거래대금 등 다른 필터와 관계없이 전체 분석 종목에서 검색합니다.');
+  }
   text($('counter'),`검색 ${fmt(candidates.length)}개 · ${fmt(Math.min(countShown,candidates.length))}개 표시`);
   const out=$('results');out.replaceChildren();
   if(!dataRows.length){out.append(elem('p','empty','분석 결과가 없습니다. Actions 수집 성공 여부를 확인하세요.'));$('more').hidden=true;return;}
-  if(!candidates.length){out.append(elem('p','empty','현재 검색 조건에 맞는 종목이 없습니다. 필터를 완화해 보세요.'));$('more').hidden=true;return;}
+  if(!candidates.length){out.append(elem('p','empty',searching?'검색한 종목이 분석 목록에 없습니다. 종목명을 다시 확인하거나 분석 제외 종목인지 확인하세요.':'현재 검색 조건에 맞는 종목이 없습니다. 필터를 완화해 보세요.'));$('more').hidden=true;return;}
   const frag=document.createDocumentFragment();
   for(const x of candidates.slice(0,countShown)){
     const card=elem('article','card');
@@ -143,6 +175,8 @@ async function load(){
 }
 ['query','viewmode','market','minscore','minvalue','change','sort','position'].forEach(id=>
   $(id).addEventListener(id==='query'?'input':'change',()=>{countShown=20;display();}));
+$('findstock').addEventListener('click',()=>{countShown=20;display();document.querySelector('.titlebar').scrollIntoView({behavior:'smooth',block:'start'});});
+$('query').addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();$('query').blur();$('findstock').click();}});
 $('more').addEventListener('click',()=>{countShown+=20;display();});
 $('refresh').addEventListener('click',load);
 load();
