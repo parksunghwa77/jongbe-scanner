@@ -1,0 +1,631 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#101827">
+  <title>종베 스캐너 v6.5 · 일봉 차트와 기업 기본정보</title>
+  <style>
+    :root{color-scheme:dark}*{box-sizing:border-box}
+    body{margin:0;background:#101827;color:#f3f6fe;font-family:system-ui,-apple-system,"Noto Sans KR",sans-serif}
+    main{max-width:800px;margin:auto;padding:20px 16px 48px}
+    h1{font-size:29px;margin:20px 0 12px}h2{font-size:18px;margin:0}
+    p{color:#b9c7db;line-height:1.65}small{color:#a6b8d0;line-height:1.6}
+    button,select,input{font:inherit}
+    button{background:#618dff;border:none;border-radius:11px;color:white;padding:11px 17px;cursor:pointer;font-weight:700}
+    button:disabled{opacity:.6}
+    select,input{background:#1c2940;color:#f4f6fd;border:1px solid #405471;border-radius:9px;padding:10px 11px;min-width:0;width:100%}
+    label{display:flex;gap:7px;flex-direction:column;color:#bed0e7;font-size:13px;font-weight:600}
+    .badge{display:inline-block;background:#443316;color:#ffe0a1;border-radius:9px;padding:9px 12px;font-weight:700;font-size:14px}
+    .meta{margin:17px 0;background:#1b2940;border:1px solid #344866;border-radius:12px;padding:14px;color:#cedaeb;line-height:1.6}
+    .bar{display:flex;align-items:center;gap:11px;flex-wrap:wrap;margin:15px 0}
+    .fresh-alert{margin:12px 0 18px;padding:15px 16px;border:2px solid #e2ab4e;background:#3f301b;border-radius:11px;color:#ffe5af;font-weight:750;line-height:1.65}
+    .fresh-alert[hidden]{display:none}
+    .filters{border:1px solid #2c3c55;background:#151f32;border-radius:13px;padding:14px;margin:12px 0 22px;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:13px}
+    .full{grid-column:1/-1}.titlebar{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:20px 0 12px}
+    .card{border:1px solid #344866;background:#1b2940;border-radius:15px;padding:17px;margin-bottom:12px}
+    .cardtop{display:flex;align-items:flex-start;justify-content:space-between;gap:10px}
+    .name{font-size:17px;font-weight:750;overflow-wrap:anywhere}
+    .score{font-size:24px;font-weight:800;color:#83edbb;white-space:nowrap}
+    .muted{font-size:13px;color:#a7bbd8}.details{display:grid;grid-template-columns:1fr 1fr;gap:6px 12px;margin-top:12px;color:#cad7e8;font-size:13px}
+    .rules{margin-top:24px;padding:13px 15px;background:#172237;border-radius:12px;font-size:12px;color:#b2c4df;line-height:1.75}
+    .error{color:#ffbcae}.stale{color:#ffdf98}.pill{font-size:11px;background:#314869;color:#d2e7ff;border-radius:6px;padding:3px 6px;margin-left:6px}
+    .performance{background:#1b2940;border:1px solid #426083;padding:16px;border-radius:14px;margin:16px 0}
+    .performance strong{color:#85f0bf}
+    .performance p{margin:6px 0}
+    .history{width:100%;border-collapse:collapse;font-size:12px;margin-top:11px}
+    .history th,.history td{border-bottom:1px solid #36475e;padding:8px 3px;text-align:left}
+    .alertpill{font-size:11px;background:#66412a;color:#ffe7ba;border-radius:5px;padding:3px 6px;margin-left:6px}
+    .goldenpill{font-size:11px;background:#225343;color:#beffde;border-radius:5px;padding:3px 6px;margin-left:6px}
+    .trend-legend{background:#162237;border:1px solid #3a4c66;border-radius:13px;padding:15px;margin:16px 0}
+    .trend-legend h3{font-size:16px;margin:0 0 10px}
+    .trend-line{display:flex;gap:10px;align-items:flex-start;margin:10px 0;font-size:13px;line-height:1.5;color:#c3d2e7}
+    .trend-line .trendbadge{flex-shrink:0;min-width:91px;text-align:center}
+    .trendbadge{display:inline-block;border:1px solid transparent;padding:5px 8px;border-radius:8px;font-size:12px;font-weight:800;margin:3px 0 0}
+    .trendbadge.strong_up{background:#174b37;color:#b3ffd5;border-color:#459873}
+    .trendbadge.rising{background:#173f61;color:#a9d9ff;border-color:#397cad}
+    .trendbadge.sideways{background:#4e421b;color:#ffedab;border-color:#9f8a43}
+    .trendbadge.falling{background:#57371f;color:#ffcb99;border-color:#bd7843}
+    .trendbadge.strong_down{background:#582630;color:#ffc4cb;border-color:#b96372}
+    .trendbadge.unavailable{background:#3a4453;color:#e0e6f0;border-color:#6a7587}
+    .trend-inline{margin:7px 0 2px;font-size:12px;line-height:1.6;color:#c1d3ec}
+    .trend-explain{margin-top:12px;border-top:1px solid #3a4b65;padding-top:10px;color:#bad2ed;font-size:12px;line-height:1.65}
+    .trend-explain summary{cursor:pointer;font-weight:700;color:#d3e3fa;padding:4px 0}
+    .trend-explain p{font-size:12px;margin:6px 0}
+
+    .searchblock{display:flex;flex-direction:column;gap:7px}
+    .searchblock>label{display:block}
+    .searchrow{display:flex;gap:8px}
+    .searchrow>input{flex:1;min-width:0}
+    .searchrow>button{flex-shrink:0}
+    .searchhint{font-weight:500;color:#b4d4ff;line-height:1.55}
+    .pager{display:flex;justify-content:center;margin:15px 0}.empty{padding:20px 6px}
+    @media(min-width:620px){.filters{grid-template-columns:repeat(4,minmax(0,1fr))}.full{grid-column:span 2}}
+
+    [hidden]{display:none!important}
+    a{color:#a5c0ff} a:hover{text-decoration:underline}
+    .app-title{margin:20px 0 8px}.app-title span{color:#a6c7ff;font-size:18px}
+    .status-pill{display:inline-flex;gap:5px;align-items:center;color:#f6dba5;background:#483619;padding:8px 11px;border-radius:9px;font-size:13px;font-weight:750}
+    .switcher{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:18px 0 17px}
+    .switcher button{border:1px solid #3a5479;border-radius:12px;background:#1b2940;color:#dce6f7;padding:14px 7px}
+    .switcher button.selected{background:#5681ea;color:white;border-color:#87a5ff;box-shadow:0 0 0 2px #355a93}
+    .v6-hero{border:1px solid #334867;border-radius:16px;background:linear-gradient(140deg,#1d304b,#152037);padding:17px;margin:12px 0 16px}
+    .v6-hero p{margin:8px 0}.v6-heading{font-size:20px;font-weight:850}
+    .v6-meta{border:1px solid #304866;background:#1b2940;border-radius:14px;padding:15px;margin:15px 0;color:#cbdaf0;line-height:1.7}
+    .v6-warn{padding:13px 14px;background:#3c301e;border:1px solid #a77b38;color:#ffde9a;border-radius:12px;line-height:1.65;margin:14px 0}
+    .v6-stats{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:9px;margin:16px 0}
+    .v6-stat{border:1px solid #344968;background:#1c2940;border-radius:11px;padding:12px 8px;text-align:center}
+    .v6-stat strong{display:block;font-size:22px;color:#83edbb}.v6-stat span{font-size:11px;color:#b3c7e4}
+    .v6-tools{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin:16px 0 20px}
+    .v6-tools label{min-width:0}.v6-tools label:first-child{grid-column:1/-1}
+    .v6-controls{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:13px 0}
+    .v6-controls a{font-size:13px}
+    .v6-card{border:1px solid #354966;background:#1b2940;border-radius:14px;padding:15px;margin:12px 0}
+    .v6-card strong{font-size:16px}.v6-card .v6-card-top{display:flex;justify-content:space-between;gap:12px}
+    .v6-card .v6-score{font-weight:800;color:#83edbb;font-size:26px;white-space:nowrap}
+    .v6-tag{display:inline-block;margin-top:8px;border-radius:8px;background:#334564;padding:4px 8px;color:#e4edff;font-size:12px}
+    .v6-risk{background:#533620;color:#ffceaa}
+    .v6-note{font-size:12px;color:#b6c8e0;line-height:1.65;margin-top:15px}
+    .v6-empty{padding:20px 13px;border:1px dashed #54698a;border-radius:11px;line-height:1.7;color:#bccbe2}
+    .v6-inline{font-size:12px;color:#abc6ee}.v6-refresh{padding:10px 15px}
+    @media(max-width:360px){.v6-stats{gap:4px}.v6-stat strong{font-size:17px}.v6-stat span{font-size:10px}}
+
+    /* v6.5: 개별 종목의 과거 확정 일봉 차트 */
+    .chart-expander{margin-top:12px;border:1px solid #375477;border-radius:10px;background:#152238;overflow:hidden}
+    .chart-expander>summary{padding:12px;cursor:pointer;font-weight:750;color:#d4e7ff;list-style:revert}
+    .chart-expander[open]>summary{border-bottom:1px solid #375477}
+    .chart-content{padding:10px}
+    .chart-times{display:flex;gap:7px;flex-wrap:wrap;margin-bottom:10px}
+    .chart-times button{padding:8px 11px;background:#2a3e60;border:1px solid #466186;font-size:13px;border-radius:8px}
+    .chart-times button.active{background:#5681ea;border-color:#94b1ff}
+    .chart-legend{display:flex;gap:8px 13px;flex-wrap:wrap;font-size:12px;color:#d3e0f2;margin:6px 0 10px}
+    .legend-key{display:inline-block;width:13px;height:3px;vertical-align:middle;margin-right:5px}
+    .chart-scroll{overflow-x:auto;max-width:100%;border:1px solid #344968;border-radius:9px;background:#101c30;touch-action:pan-x pan-y}
+    .chart-canvas{display:block;height:330px;cursor:crosshair}
+    .chart-detail{color:#dceaff;font-size:12px;line-height:1.6;margin-top:9px;min-height:22px}
+    .chart-caption{font-size:11px;color:#afc5df;line-height:1.65;margin-top:9px}
+    .chart-error{color:#ffce9d;padding:12px 2px;font-size:13px;line-height:1.65}
+
+    /* 회사명 터치 시 표시되는 회사 기본정보. 빈 데이터는 명확히 미수집 처리. */
+    .company-title{display:inline;background:transparent;border:0;padding:0;margin:0;text-align:left;color:#f4f8ff;font:inherit;text-decoration:underline;text-decoration-color:#79aeef;text-underline-offset:4px;cursor:pointer}
+    .company-title:focus-visible{outline:2px solid #92bbff;outline-offset:3px}
+    .company-panel{margin-top:12px;border:1px solid #416186;background:#14253a;border-radius:11px;overflow:hidden}
+    .company-panel>summary{padding:12px;color:#cdeaff;cursor:pointer;font-weight:750}
+    .company-panel[open]>summary{border-bottom:1px solid #416186}
+    .company-content{padding:12px}
+    .company-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px 12px;margin:0}
+    .company-grid>div{min-width:0;border-bottom:1px solid #314764;padding-bottom:7px}
+    .company-grid dt{font-size:11px;color:#a7c3e3}
+    .company-grid dd{margin:5px 0 0;font-size:13px;color:#e3edff;overflow-wrap:anywhere;line-height:1.5}
+    .company-note{margin:12px 0;color:#abc3df;font-size:12px;line-height:1.6}
+    .company-links{display:flex;flex-wrap:wrap;gap:11px;font-size:12px;margin:8px 0}
+    .company-load{color:#c6dafa;font-size:13px}
+    @media(max-width:370px){.company-grid{grid-template-columns:1fr}}
+  </style>
+</head>
+<body><main>
+  <h1 class="app-title">📈 종베 스캐너 <span>v6.5</span></h1>
+  <div class="status-pill">🔎 읽기 전용 · 투자 추천 아님</div>
+  <nav class="switcher" aria-label="분석 화면 선택">
+    <button id="tabv6" type="button" class="selected" aria-pressed="true">v6 장중 관찰</button>
+    <button id="tabv5" type="button" aria-pressed="false">v5 일봉 전종목</button>
+  </nav>
+  <section id="v6panel" aria-label="v6 장중 관찰 화면">
+    <div class="v6-hero">
+      <div class="v6-heading">🛰️ 오후 2시 30분 장중 관찰</div>
+      <p>나무증권 API로 관심종목과 전날 일봉 후보 <b>최대 55종목</b>을 평가한 점수를 표시합니다. 나무증권 API의 장중 원시 시세는 공개 웹사이트에 게시하지 않습니다. 회사 상세 차트는 별도의 공개 마감 일봉을 사용합니다.</p>
+      <small>평일 14:30(KST) 예약 시도 · GitHub Actions 실행 지연 가능 · 실시간 스트리밍/5분봉 아님</small>
+    </div>
+    <div class="v6-controls">
+      <button id="v6refresh" type="button" class="v6-refresh">v6 결과 새로고침</button>
+      <a href="https://github.com/parksunghwa77/jongbe-scanner/actions/workflows/namuh-v6-afternoon.yml" target="_blank" rel="noopener noreferrer">GitHub 실행 기록 ↗</a>
+    </div>
+    <div class="v6-meta" id="v6status" role="status" aria-live="polite">장중 분석 점수 확인 중…</div>
+    <div class="v6-warn" id="v6fresh" role="alert">⚠️ 조회 시각은 체결 시각이 아닙니다. 실제 당일 체결인지 확인되지 않았으므로 점수만으로 매매하지 마세요.</div>
+    <div class="v6-stats">
+      <div class="v6-stat"><strong id="v6count">–</strong><span>분석된 종목</span></div>
+      <div class="v6-stat"><strong id="v6pass">–</strong><span>60점 이상·위험 제외</span></div>
+      <div class="v6-stat"><strong id="v6shown">–</strong><span>현재 표시</span></div>
+    </div>
+    <div class="v6-tools">
+      <label>이름 또는 종목코드 검색<input id="v6query" type="search" placeholder="삼성전자, 005930" autocomplete="off"></label>
+      <label>최소 점수<select id="v6min"><option value="0">전체 점수</option><option value="40">40점 이상</option><option value="60" selected>60점 이상</option><option value="80">80점 이상</option><option value="100">100점</option></select></label>
+      <label>위험 표시<select id="v6risk"><option value="safe" selected>급변 위험 제외</option><option value="all">전체 포함</option><option value="risk">급변 위험만</option></select></label>
+    </div>
+    <div class="titlebar"><h2>v6 조건 점수 순위</h2><small id="v6counter">데이터 확인 중</small></div>
+    <section id="v6results" aria-label="장중 관찰 후보 검색 결과"><p class="v6-empty">검색 결과를 불러오는 중입니다.</p></section>
+    <p class="v6-note">공개되는 정보는 종목코드·이름·산출 점수·위험 표시·조회 작업 시각만입니다. 나무증권 API 키·인증 토큰·장중 원시 시세는 웹에 게시하지 않습니다. 공개된 과거 확정 일봉의 시세·거래량·이평선은 개별 종목 차트에 표시됩니다. 점수는 상승 확률이나 실전 수익 검증이 아닙니다. <b>v6 결과는 오후 2시 30분 장중 작업 완료 후</b> 게시되며 휴일에는 새 결과를 만들지 않습니다. GitHub 저장소가 공개라 점수는 다른 사람도 볼 수 있습니다.</p>
+  </section>
+  <section id="v5panel" aria-label="v5 전종목 일봉 검색" hidden>
+    <h2>확정 일봉 전종목 · 정배열·골든크로스·추세 색상 검색</h2>
+  <div class="badge">⚠️ 장 마감 후 확정 일봉 · 실시간 아님</div>
+  <p>코스피·코스닥 공개 일봉을 평가하고 과거 후보의 다음 거래일 변화를 함께 검증합니다. <b>점수는 상승 확률이나 매수 추천이 아닙니다.</b></p>
+  <p class="chart-caption">🏢 <b>회사명을 누르면 기업 기본정보와 📈 일봉 차트가 열립니다.</b> 차트 메뉴에서도 직접 열 수 있습니다. 개별 종목의 <b>📈 일봉 차트 펼치기</b>를 누르면 과거 확정 일봉과 5·20·200일선, 거래량 및 교차·돌파 지점을 확인할 수 있습니다. 최신 장중 시세가 아닙니다.</p>
+  <div class="bar"><button id="refresh" type="button">결과 새로고침</button><small>평일 18:15 및 월~토 09:30(KST) 재확인 예약 · 지연/실패 가능</small></div>
+  <div class="meta" id="status" role="status" aria-live="polite">분석 데이터 확인 중...</div>
+  <div class="fresh-alert" id="freshness" role="alert" hidden></div>
+  <section class="performance" aria-label="과거 종목 관찰 성과" id="backtest"><h2>과거 관찰 조건 검증</h2><p>분석 결과를 불러오는 중...</p></section>
+  <section class="trend-legend" aria-label="색깔별 추세 설명">
+    <h3>🎨 종목 추세 색상 안내 <small>· 확정 일봉 기준 / 예측 아님</small></h3>
+    <div class="trend-line"><span class="trendbadge strong_up">🟢 강한 상승</span><span>종가·5·20·200일선 정배열 + 20·200일선의 5거래일 기울기 상승</span></div>
+    <div class="trend-line"><span class="trendbadge rising">🔵 상승 시도</span><span>5일선이 20일선 상향 돌파, 또는 20일선 상승 속에서 주가·5일선이 20일선 위</span></div>
+    <div class="trend-line"><span class="trendbadge sideways">🟡 횡보·혼조</span><span>상승/하락 조건이 불명확한 상태. 강한 상승·하락 신호에 해당하지 않음</span></div>
+    <div class="trend-line"><span class="trendbadge falling">🟠 하락 경계</span><span>5일선이 20일선 하향 돌파, 또는 20일선 하락 속에서 주가·5일선이 20일선 아래</span></div>
+    <div class="trend-line"><span class="trendbadge strong_down">🔴 강한 하락</span><span>종가·5·20·200일선 역배열 + 20·200일선의 5거래일 기울기 하락</span></div>
+    <div class="trend-line"><span class="trendbadge unavailable">⚪ 자료 미갱신</span><span>새 분석 전이거나 추세 계산 정보가 없는 종목</span></div>
+    <small>20일선 기울기 기준: 5거래일간 ±0.2% 이상. 색상은 관찰용 분류이며 상승 확률이나 매매 지시가 아닙니다. 종목 카드의 '판정 근거 보기'로 확인할 수 있어요.</small>
+  </section>
+  <section class="filters" aria-label="검색 조건">
+    <div class="full searchblock"><label for="query">종목 검색 (이름 또는 코드)</label>
+      <div class="searchrow"><input id="query" type="search" placeholder="예: 삼성전자, 005930" autocomplete="off" enterkeyhint="search"><button id="findstock" type="button">검색</button></div>
+      <small id="searchhint" class="searchhint" aria-live="polite">종목명을 입력하면 점수·거래대금 등 다른 필터와 관계없이 전체 분석 종목에서 검색합니다.</small>
+    </div>
+    <label>관찰 조건<select id="viewmode"><option value="all">전체 (기존 필터)</option><option value="watch">관찰 후보만 · 추격 급등 제외</option></select></label>
+    <label>시장<select id="market"><option value="ALL">코스피 + 코스닥</option><option value="KOSPI">코스피</option><option value="KOSDAQ">코스닥</option></select></label>
+    <label>이동평균 조건<select id="mafilter"><option value="all">전체 (제한 없음)</option><option value="aligned">정배열 (5일 &gt; 20일 &gt; 200일)</option><option value="golden">오늘 5·20일 골든크로스</option><option value="both">정배열 + 오늘 골든크로스</option></select></label>
+    <label>추세 색상별 보기<select id="trendfilter"><option value="all">🎨 전체 추세</option><option value="strong_up">🟢 강한 상승</option><option value="rising">🔵 상승 시도</option><option value="sideways">🟡 횡보·혼조</option><option value="falling">🟠 하락 경계</option><option value="strong_down">🔴 강한 하락</option><option value="unavailable">⚪ 자료 미갱신</option></select></label>
+    <label>최소 점수<select id="minscore"><option value="0">0점 이상</option><option value="40" selected>40점 이상</option><option value="60">60점 이상</option><option value="80">80점 이상</option></select></label>
+    <label>최소 거래대금<select id="minvalue"><option value="0">제한 없음</option><option value="30">30억 원</option><option value="50" selected>50억 원</option><option value="100">100억 원</option><option value="300">300억 원</option></select></label>
+    <label>등락 조건<select id="change"><option value="up" selected>상승 종목만</option><option value="all">전체</option></select></label>
+    <label>정렬<select id="sort"><option value="score">조건 점수순</option><option value="value">거래대금순</option><option value="volume">거래량 증가순</option><option value="change">당일 상승률순</option></select></label>
+    <label>종가 위치<select id="position"><option value="0">제한 없음</option><option value="60" selected>60% 이상</option><option value="75">75% 이상</option><option value="90">90% 이상</option></select></label>
+  </section>
+  <div class="titlebar"><h2>조건 검색 결과</h2><small id="counter">0개</small></div>
+  <section id="results" aria-label="종목 검색 결과"></section>
+  <div class="pager"><button id="more" type="button" hidden>20개 더 보기</button></div>
+  <p class="rules">회사명을 누르면 기본정보와 차트가 열립니다. 업종·대표·제품 정보는 KIND 접속이 가능할 때만 표시하며, 미수집 정보는 추정하지 않습니다. 개별 일봉 차트는 공개 마감 데이터만 사용하며 1년 기준 약 252거래일을 표시합니다. G=골든크로스, D=데드크로스, 20/200=각 이동평균선 상향 돌파입니다. 이들은 확정 일봉의 과거 발생 지점이며 매수 신호가 아닙니다. <b>차트는 현재 v5 확정 일봉 데이터이며 v6 장중 시세와 다른 기준일일 수 있습니다.</b> 점수 기준: 종가&gt;5일 평균선 +25점, 5일선&gt;20일선 +25점, 거래량&gt;이전 20거래일 평균의 1.5배 +20점, 당일 고저가 대비 종가 위치≥75% +20점, 당일 등락률 양수 +10점. 최대 100점. <b>거래대금은 KRX에서 제공한 실제 누적 거래대금</b>을 사용합니다. 거래정지·신규 상장 등 최근 55거래일 자료가 불완전한 종목은 점수 계산에서 제외합니다. 200일선은 200거래일, 200일선 기울기는 205거래일의 종가가 확보되어야 표시됩니다. 부족하면 ‘자료 부족’으로 나타납니다. <b>정배열: 5일선 &gt; 20일선 &gt; 200일선, 오늘 골든크로스: 전 거래일 5일선 ≤ 20일선이면서 당일 5일선 &gt; 20일선.</b> 색상별 추세 판정은 20·200일선의 5거래일 변화와 이평 배치를 이용한 규칙 분류입니다. 기간 및 변화율 기준에 따라 결과는 달라질 수 있으며 강한 상승/하락, 상승 시도/하락 경계 모두 예측이나 매매 신호가 아닙니다. 거래일별 종가를 이용한 판정이며 필터 적용은 기존 점수 계산 기준을 변경하지 않습니다. 우선주·스팩 등도 포함될 수 있습니다. 과거 결과의 다음날 종가 변화는 참고용 관찰값일 뿐 투자 수익이나 미래 성과를 보장하지 않습니다. 외국인·기관·프로그램 매매 분석 및 14:30 장중 실시간 검색은 제공하지 않습니다. FinanceData/marcap 원본은 갱신이 늦어질 수 있습니다. 화면의 <b>기준일과 기대 거래일</b>을 반드시 확인하세요. 최신 시세가 없을 때 표시되는 종목은 과거 기록입니다.</p>
+  </section>
+</main>
+<script>
+'use strict';
+const $ = id => document.getElementById(id);
+const fmt = n => Number(n).toLocaleString('ko-KR');
+const formatMa = v => (v===null || v===undefined || v==='' || !Number.isFinite(Number(v))) ? '자료 부족' : `${fmt(Math.round(Number(v)))}원`;
+const text = (el, s) => {el.textContent = String(s??'');return el;};
+const TREND_LABELS={strong_up:'🟢 강한 상승',rising:'🔵 상승 시도',sideways:'🟡 횡보·혼조',falling:'🟠 하락 경계',strong_down:'🔴 강한 하락',unavailable:'⚪ 자료 미갱신'};
+const trendKind = x => Object.prototype.hasOwnProperty.call(TREND_LABELS,x?.trend)?x.trend:'unavailable';
+const trendName = x => TREND_LABELS[trendKind(x)];
+const trendSlope = v => (v===null || v===undefined || !Number.isFinite(Number(v)))?'자료 부족':`${Number(v)>0?'+':''}${Number(v).toFixed(2)}%`;
+const trendChip = x => elem('span','trendbadge '+trendKind(x),trendName(x));
+const elem = (tag,cls,value) => {const a=document.createElement(tag);if(cls)a.className=cls;if(value!==undefined)text(a,value);return a;};
+let dataRows = [], countShown = 20, infoDate = '';
+function displayBacktest(bt){
+  const box=$('backtest');box.replaceChildren();box.append(elem('h2','','과거 관찰 조건 검증 · 실거래 수익 아님'));
+  if(!bt || !Array.isArray(bt.by_day)){box.append(elem('p','','과거 성과 데이터가 없습니다. 자동 분석을 다시 실행하세요.'));return;}
+  const mean=bt.average_pct==null?'계산 불가':`${bt.average_pct>0?'+':''}${bt.average_pct}%`;
+  const wins=bt.win_rate_pct==null?'계산 불가':`${bt.win_rate_pct}%`;
+  box.append(elem('p','',`지난 ${bt.days}거래일 · 후보 ${fmt(bt.selected)}건 · 다음날 가격 확인 ${fmt(bt.observed)}건 · 결측 ${fmt(bt.missing_next_day)}건`));
+  const p=elem('p');p.append(elem('strong','',`다음 거래일 종가 평균 변화 ${mean} · 상승 비율 ${wins}`));box.append(p);
+  box.append(elem('small','',bt.criteria||''));
+  box.append(elem('p','',bt.caution||''));
+  const table=elem('table','history');const thead=elem('thead');const head=elem('tr');
+  ['후보 기준일','다음 거래일','선정/확인','평균 변화'].forEach(s=>head.append(elem('th','',s)));thead.append(head);table.append(thead);
+  const body=elem('tbody');
+  [...bt.by_day].reverse().forEach(d=>{const row=elem('tr');
+    [d.date,d.next_date,`${d.selected}/${d.observed}`,d.mean_pct==null?'–':`${d.mean_pct>0?'+':''}${d.mean_pct}%`].forEach(s=>row.append(elem('td','',s)));body.append(row);});
+  table.append(body);box.append(table);
+}
+
+/* v6.5 차트: 공개 확정 일봉 데이터만 로드. 시세 제공 API 토큰을 브라우저에 전달하지 않는다. */
+const chartBundles = new Map();
+const chartColors = {up:'#ef667a',down:'#5ba6f8',ma5:'#63afff',ma20:'#ffa55b',ma200:'#c4a1fa',volume:'#60799d',grid:'#33465d',text:'#acc1d9',golden:'#73eac2',dead:'#ffb180'};
+let chartDateVersion='';
+function clearChartCacheIfDateChanged(){
+  if(chartDateVersion!==infoDate){chartBundles.clear();chartDateVersion=infoDate;}
+}
+async function getChartSeries(code){
+  if(!/^\d{6}$/.test(code))throw Error('잘못된 종목코드입니다.');
+  if(!infoDate || infoDate==='-')throw Error('일봉 기준일이 없습니다. 먼저 결과를 새로고침해 주세요.');
+  clearChartCacheIfDateChanged();
+  const prefix=code.slice(0,2);
+  if(!chartBundles.has(prefix)){
+    const promise=(async()=>{
+      const r=await fetch(`./charts/${prefix}.json?asof=${encodeURIComponent(infoDate)}`,{cache:'no-store'});
+      if(!r.ok)throw Error(r.status===404?'차트 데이터가 아직 배포되지 않았습니다. v6.5 scanner.yml 설치 후 분석을 실행하세요.':`차트 파일을 불러오지 못했습니다 (HTTP ${r.status}).`);
+      const bundle=await r.json();
+      if(bundle.schema!=='jongbe-ohlcv-v1'||bundle.asof!==infoDate||!bundle.stocks)throw Error('차트와 종목 목록의 기준일이 일치하지 않습니다. 자동 분석을 다시 실행해 주세요.');
+      return bundle;
+    })();
+    chartBundles.set(prefix,promise);
+    if(chartBundles.size>10)chartBundles.delete(chartBundles.keys().next().value);
+    promise.catch(()=>{if(chartBundles.get(prefix)===promise)chartBundles.delete(prefix);});
+  }
+  const bundle=await chartBundles.get(prefix);
+  const records=bundle.stocks[code];
+  if(!Array.isArray(records)||!records.length)throw Error('해당 종목의 차트 데이터가 없습니다.');
+  return records.filter(r=>Array.isArray(r)&&/^\d{4}-\d{2}-\d{2}$/.test(r[0])&&r.length>=10&&
+    [r[1],r[2],r[3],r[4],r[5]].every(v=>Number.isFinite(v))&&r[2]>=r[3]&&r[4]>0);
+}
+
+/* v6.5: 회사명 터치 → 기업 기본정보 + 같은 종목의 확정 일봉 차트. */
+async function getStockProfile(code){
+  await getChartSeries(code); // 기존 차트 번들/기준일 검사와 캐시를 동일하게 이용
+  const bundle=await chartBundles.get(code.slice(0,2));
+  return bundle.profiles && bundle.profiles[code] ? bundle.profiles[code] : null;
+}
+function addCompanyPanel(card,stock){
+  const panel=elem('details','company-panel');
+  panel.append(elem('summary','','🏢 기업 기본정보 보기 · 회사명을 누르면 열립니다'));
+  const body=elem('div','company-content');
+  panel.append(body);card.append(panel);
+  let loading=false,loaded=false;
+  const basic=(profile)=>{
+    const p=profile||{};
+    const container=elem('dl','company-grid');
+    const pair=(label,val)=>{const wrap=elem('div');wrap.append(elem('dt','',label),elem('dd','',val??'미수집'));container.append(wrap);};
+    pair('회사명',p.name||stock.name||'미수집');
+    pair('종목코드',stock.code);
+    pair('시장',p.market||stock.market||'미수집');
+    pair('업종',p.sector||'미수집');
+    pair('주요 제품·사업',p.products||'미수집');
+    pair('대표자',p.ceo||'미수집');
+    pair('상장일',p.listed_date||'미수집');
+    pair('지역',p.region||'미수집');
+    pair('시가총액 (확정 종가 × 상장주식수)',Number.isFinite(p.market_cap_krw)?`${fmt(Math.round(p.market_cap_krw/1e8))}억 원`:'자료 부족');
+    pair('상장주식수',Number.isFinite(p.listed_shares)?`${fmt(p.listed_shares)}주`:'자료 부족');
+    pair('최근 약 1년 고가',Number.isFinite(p.period_high)?`${fmt(p.period_high)}원`:'자료 부족');
+    pair('최근 약 1년 저가',Number.isFinite(p.period_low)?`${fmt(p.period_low)}원`:'자료 부족');
+    body.replaceChildren(container);
+    const note=elem('p','company-note',`📅 주가·시가총액·고저가는 ${infoDate||'기준일 미확인'}의 확정 일봉 기반. 업종·제품·대표자·상장일 등은 KIND 상장법인 자료 연결이 가능할 때만 표시되며 수집 실패 시 미수집입니다. 회사 요약 정보는 실시간 공시가 아닙니다.`);
+    body.append(note);
+    const links=elem('div','company-links');
+    const link=(caption,url)=>{const a=elem('a','',caption);a.href=url;a.target='_blank';a.rel='noopener noreferrer';links.append(a);};
+    if(/^\d{6}$/.test(stock.code))link('📊 네이버 금융 상세정보',`https://finance.naver.com/item/main.naver?code=${stock.code}`);
+    link('🏢 KIND 상장법인 기업정보','https://kind.krx.co.kr/corpgeneral/corpList.do?method=loadInitPage&searchType=13');
+    link('📄 DART 전자공시','https://dart.fss.or.kr/');
+    const homepage=String(p.website||'').trim();
+    const withScheme=/^https?:\/\//i.test(homepage)?homepage:/^www\./i.test(homepage)?'https://'+homepage:'';
+    if(withScheme && /^https?:\/\/[^\s]+$/i.test(withScheme))link('🌐 회사 홈페이지',withScheme);
+    body.append(links);
+  };
+  panel.addEventListener('toggle',async()=>{
+    if(!panel.open || loaded || loading)return;
+    loading=true;body.replaceChildren(elem('p','company-load','회사 정보를 불러오고 있어요…'));
+    try{const info=await getStockProfile(String(stock.code));basic(info);loaded=true;}
+    catch(e){basic(null);body.prepend(elem('p','chart-error','⚠️ 회사 상세 데이터가 아직 배포되지 않았습니다. 기본 종목정보만 표시합니다. '+e.message));loaded=true;}
+    finally{loading=false;}
+  });
+  return panel;
+}
+function companyNameButton(stock){
+  const btn=elem('button','company-title',`${stock.name} (${stock.code})`);
+  btn.type='button';btn.title='회사 이름을 눌러 기업정보와 차트 확인';
+  return btn;
+}
+function addChartExpander(card,code){
+  const details=elem('details','chart-expander');
+  details.append(elem('summary','','📈 확정 일봉 차트 펼치기 · 5·20·200일선 / 거래량 / 추세 신호'));
+  const content=elem('div','chart-content');details.append(content);card.append(details);
+  details.addEventListener('toggle',async()=>{
+    if(!details.open)return;
+    if(content.dataset.loaded==='yes')return;
+    content.replaceChildren(elem('p','chart-caption','차트 자료 불러오는 중…'));
+    try{
+      const data=await getChartSeries(code);
+      if(!details.open)return;
+      content.dataset.loaded='yes';
+      buildChart(content,data,code);
+    }catch(e){content.replaceChildren(elem('p','chart-error',`⚠️ ${e.message}`));}
+  });
+}
+function buildChart(parent,rows,code){
+  parent.replaceChildren();
+  const controls=elem('div','chart-times');
+  const legend=elem('div','chart-legend');
+  for(const [label,color] of [['상승 봉',chartColors.up],['하락 봉',chartColors.down],['5일선',chartColors.ma5],['20일선',chartColors.ma20],['200일선',chartColors.ma200],['거래량',chartColors.volume]]){
+    const span=elem('span');const key=elem('i','legend-key');key.style.background=color;
+    span.append(key,document.createTextNode(label));legend.append(span);
+  }
+  const scroller=elem('div','chart-scroll');
+  const canvas=elem('canvas','chart-canvas');
+  canvas.height=330;canvas.setAttribute('role','img');canvas.setAttribute('aria-label',code+' 일봉 캔들 및 5, 20, 200일 이동평균선과 거래량');
+  scroller.append(canvas);
+  const infobar=elem('div','chart-detail');
+  const caption=elem('div','chart-caption',`📅 확정 일봉 기준일 ${infoDate} · 차트 데이터 ${rows[0][0]}~${rows[rows.length-1][0]} · 자료가 부족한 기간에는 200일선이 표시되지 않습니다. 좌우로 밀어서 과거를 볼 수 있습니다. 봉을 누르면 날짜·종가·거래량·교차 여부가 나옵니다.`);
+  parent.append(controls,legend,scroller,infobar,caption);
+  let currentPeriod=63;
+  let selected=null;
+  let drawResult=null;
+  const periods=[['1개월',21],['3개월',63],['6개월',126],['1년',252]];
+  for(const [title,n] of periods){
+    const b=elem('button',n===currentPeriod?'active':'',title);b.type='button';b.setAttribute('aria-pressed',String(n===currentPeriod));
+    b.addEventListener('click',()=>{
+      currentPeriod=n;selected=null;
+      for(const k of controls.children){k.classList.toggle('active',k===b);k.setAttribute('aria-pressed',String(k===b));}
+      paint();
+    });controls.append(b);
+  }
+  function selectedInfo(row){
+    if(!row)return '';
+    const signal=[];if(row[9]&1)signal.push('골든크로스');if(row[9]&2)signal.push('데드크로스');if(row[9]&4)signal.push('20일선 상향 돌파');if(row[9]&8)signal.push('200일선 상향 돌파');
+    return `${row[0]} | 시가 ${fmt(row[1])} / 고가 ${fmt(row[2])} / 저가 ${fmt(row[3])} / 종가 ${fmt(row[4])}원 · 거래량 ${fmt(row[5])}주${signal.length?' · '+signal.join(', '):''}`;
+  }
+  function paint(){
+    const view=rows.slice(-currentPeriod);
+    if(!view.length){text(infobar,'차트 자료 없음');return;}
+    const desired=currentPeriod<=21?13:(currentPeriod<=63?9:(currentPeriod<=126?7:5.5));
+    const gutter=58, right=15;
+    const width=Math.max(Math.floor(scroller.clientWidth)-2,Math.ceil(gutter+right+view.length*desired));
+    const height=330;
+    canvas.style.width=width+'px';canvas.style.height=height+'px';
+    const ratio=Math.min(window.devicePixelRatio||1,2);
+    canvas.width=Math.floor(width*ratio);canvas.height=Math.floor(height*ratio);
+    const g=canvas.getContext('2d');g.setTransform(ratio,0,0,ratio,0,0);
+    const top=24, bottom=239, volTop=266, volBottom=309;
+    const span=(width-gutter-right)/view.length;
+    const values=[];
+    for(const r of view){values.push(r[2],r[3]);for(const k of [6,7,8])if(Number.isFinite(r[k]))values.push(r[k]);}
+    let min=Math.min(...values),max=Math.max(...values),pad=Math.max((max-min)*0.08,max*0.004,1);
+    min=Math.max(0,min-pad);max+=pad;
+    const mapY=x=>bottom-((x-min)/(max-min))*(bottom-top);
+    const maxVolume=Math.max(1,...view.map(r=>r[5]));
+    const center=i=>gutter+span*(i+0.5);
+    g.fillStyle='#101c30';g.fillRect(0,0,width,height);
+    g.font='11px system-ui';g.lineWidth=1;g.textAlign='right';g.textBaseline='middle';
+    for(let k=0;k<=4;k++){
+      const y=top+(bottom-top)*k/4;
+      g.strokeStyle=chartColors.grid;g.beginPath();g.moveTo(gutter,y);g.lineTo(width-right,y);g.stroke();
+      g.fillStyle=chartColors.text;g.fillText(fmt(Math.round(max-(max-min)*k/4)),gutter-7,y);
+    }
+    g.textAlign='left';g.fillStyle=chartColors.text;g.fillText('거래량',5,volTop+4);
+    g.strokeStyle=chartColors.grid;g.beginPath();g.moveTo(gutter,volTop-6);g.lineTo(width-right,volTop-6);g.stroke();
+    view.forEach((r,i)=>{
+      const x=center(i),up=r[4]>=r[1];
+      g.strokeStyle=up?chartColors.up:chartColors.down;g.fillStyle=g.strokeStyle;
+      g.beginPath();g.moveTo(x,mapY(r[2]));g.lineTo(x,mapY(r[3]));g.stroke();
+      const y1=mapY(Math.max(r[1],r[4])),y2=mapY(Math.min(r[1],r[4]));
+      g.fillRect(x-Math.max(1,(span-2)*0.36),y1,Math.max(2,(span-2)*0.72),Math.max(1.1,y2-y1));
+      const vh=Math.max(1,(volBottom-volTop)*r[5]/maxVolume);
+      g.globalAlpha=.7;g.fillRect(x-Math.max(1,(span-2)*.36),volBottom-vh,Math.max(2,(span-2)*.72),vh);g.globalAlpha=1;
+      if(r[9]){
+        const markers=[[1,'G',chartColors.golden],[2,'D',chartColors.dead],[4,'20','#ffda8e'],[8,'200','#d3baff']];
+        let idx=0;
+        for(const [mask,label,col] of markers){if(!(r[9]&mask))continue;
+          const y=mask===2?Math.max(11,mapY(r[2])-13-idx*13):Math.min(259,mapY(r[3])+12+idx*13);
+          g.fillStyle=col;g.textAlign='center';g.font='bold 9px system-ui';g.fillText(label,x,y);idx++;
+        }
+      }
+    });
+    for(const [index,col] of [[6,chartColors.ma5],[7,chartColors.ma20],[8,chartColors.ma200]]){
+      g.strokeStyle=col;g.lineWidth=1.6;g.beginPath();let started=false;
+      view.forEach((r,i)=>{
+        const val=r[index];if(!Number.isFinite(val)){started=false;return;}
+        if(!started){g.moveTo(center(i),mapY(val));started=true;}else g.lineTo(center(i),mapY(val));
+      });g.stroke();
+    }
+    g.font='10px system-ui';g.fillStyle=chartColors.text;g.textAlign='center';
+    const step=Math.max(1,Math.ceil(view.length/5));
+    for(let i=0;i<view.length;i+=step)g.fillText(view[i][0].slice(5),center(i),324);
+    if(selected!==null&&selected>=0&&selected<view.length){
+      const x=center(selected);g.setLineDash([3,4]);g.strokeStyle='#d9e3f9';g.beginPath();g.moveTo(x,top);g.lineTo(x,volBottom);g.stroke();g.setLineDash([]);
+    }
+    text(infobar,selectedInfo(view[selected===null?view.length-1:selected]));
+    drawResult={view,gutter,span};
+    requestAnimationFrame(()=>{scroller.scrollLeft=scroller.scrollWidth-scroller.clientWidth;});
+  }
+  canvas.addEventListener('pointerdown',e=>{
+    if(!drawResult)return;
+    const x=e.clientX-canvas.getBoundingClientRect().left;
+    selected=Math.min(drawResult.view.length-1,Math.max(0,Math.floor((x-drawResult.gutter)/drawResult.span)));
+    paint();
+  });
+  // 숨겨진 상태에서 폭 측정을 피하고, 이후 화면 회전에도 다시 그린다.
+  const resize=()=>{if(parent.isConnected&&parent.offsetParent!==null)paint();};
+  if(typeof ResizeObserver!=='undefined'){
+    const observer=new ResizeObserver(()=>{if(parent.isConnected&&parent.offsetParent!==null)paint();else observer.disconnect();});
+    observer.observe(scroller);
+  }
+  paint();
+}
+
+function display(){
+  // 개별 종목 검색은 조건 스캐너 필터와 분리한다. (예: 삼성전자 0점도 검색됨)
+  const normalize = s => String(s??'').normalize('NFKC').toLowerCase().replace(/\s+/g,'');
+  const query=normalize($('query').value);
+  const searching=query.length>0;
+  const market=$('market').value;
+  const minscore=Number($('minscore').value), minvalue=Number($('minvalue').value), minpos=Number($('position').value);
+  const up=$('change').value === 'up', order=$('sort').value, watchOnly=$('viewmode').value==='watch', mafilter=$('mafilter').value, trendfilter=$('trendfilter').value;
+  const candidates=dataRows.filter(x=>{
+    if(searching){
+      // 검색어를 입력하면 다른 조건(시장, 점수, 거래대금, 상승/하락, 종가위치 등)을 무시
+      return normalize(x.name).includes(query) || normalize(x.code).includes(query);
+    }
+    const maMatch=mafilter==='all' ||
+      (mafilter==='aligned' && x.ma_aligned===true) ||
+      (mafilter==='golden' && x.golden_cross===true) ||
+      (mafilter==='both' && x.ma_aligned===true && x.golden_cross===true);
+    return maMatch && (trendfilter==='all' || trendKind(x)===trendfilter) && (market === 'ALL' || x.market === market) && (!watchOnly || x.watch === true) &&
+      Number(x.score)>=minscore && Number(x.value_eok)>=minvalue &&
+      Number(x.close_position)>=minpos && (!up || Number(x.change)>0);
+  });
+  if(searching){
+    const relevance = x => {
+      const n=normalize(x.name), c=normalize(x.code);
+      return n===query||c===query?0:(n.startsWith(query)||c.startsWith(query)?1:2);
+    };
+    candidates.sort((a,b)=>relevance(a)-relevance(b)||Number(b.score)-Number(a.score)||Number(b.value_eok)-Number(a.value_eok));
+  }else{
+    if(order==='value') candidates.sort((a,b)=>b.value_eok-a.value_eok||b.score-a.score);
+    if(order==='volume') candidates.sort((a,b)=>b.volume_ratio-a.volume_ratio||b.score-a.score);
+    if(order==='change') candidates.sort((a,b)=>b.change-a.change||b.score-a.score);
+    if(order==='score') candidates.sort((a,b)=>b.score-a.score||b.value_eok-a.value_eok);
+  }
+  const searchhint=$('searchhint');
+  if(searching){
+    const names=candidates.slice(0,3).map(x=>`${x.name}(${x.code})`).join(', ');
+    text(searchhint,candidates.length?`🔎 ${fmt(candidates.length)}개 검색됨: ${names}${candidates.length>3?' 외':''} · 다른 조건 무시`:
+      '🔎 검색 결과 없음. 전체 상장종목 중 분석 데이터가 부족해 제외된 종목도 있습니다.');
+  }else{
+    text(searchhint,'종목명을 입력하면 점수·거래대금 등 다른 필터와 관계없이 전체 분석 종목에서 검색합니다.');
+  }
+  text($('counter'),`검색 ${fmt(candidates.length)}개 · ${fmt(Math.min(countShown,candidates.length))}개 표시`);
+  const out=$('results');out.replaceChildren();
+  if(!dataRows.length){out.append(elem('p','empty','분석 결과가 없습니다. Actions 수집 성공 여부를 확인하세요.'));$('more').hidden=true;return;}
+  if(!candidates.length){out.append(elem('p','empty',searching?'검색한 종목이 분석 목록에 없습니다. 종목명을 다시 확인하거나 분석 제외 종목인지 확인하세요.':'현재 검색 조건에 맞는 종목이 없습니다. 필터를 완화해 보세요.'));$('more').hidden=true;return;}
+  const frag=document.createDocumentFragment();
+  for(const x of candidates.slice(0,countShown)){
+    const card=elem('article','card');
+    const top=elem('div','cardtop');const left=elem('div');
+    const title=elem('div','name');
+    const companyBtn=companyNameButton(x);title.append(companyBtn);
+    title.append(elem('span','pill',x.market==='KOSPI'?'코스피':'코스닥'));
+    if(x.chase_risk)title.append(elem('span','alertpill','급등 추격주의'));
+    if(x.watch)title.append(elem('span','pill','관찰조건 충족'));
+    if(x.ma_aligned===true)title.append(elem('span','pill','이평 정배열'));
+    if(x.golden_cross===true)title.append(elem('span','goldenpill','오늘 골든크로스'));
+    title.append(trendChip(x));
+    left.append(title,elem('div','muted',`기준일 ${x.date || infoDate}`));
+    top.append(left,elem('div','score',`${x.score}점`));
+    const detail=elem('div','details');
+    [ `종가 ${fmt(x.price)}원`,`전일 대비 ${Number(x.change)>0?'+':''}${x.change}%`,
+      `거래대금 ${fmt(x.value_eok)}억 원`,`거래량 ${x.volume_ratio}배`,
+      `종가 위치 ${x.close_position}%`,
+      `5일선 ${formatMa(x.ma5)}`,`20일선 ${formatMa(x.ma20)}`,`200일선 ${formatMa(x.ma200)}` ].forEach(s=>detail.append(elem('div','',s)));
+    const slopeLine=elem('div','trend-inline',`20일선 기울기(5거래일) ${trendSlope(x.ma20_slope_5d_pct)} · 200일선 ${trendSlope(x.ma200_slope_5d_pct)}`);
+    const why=elem('details','trend-explain');why.append(elem('summary','','📌 추세 판정 근거 보기'));
+    why.append(elem('p','',x.trend_reason||'아직 일봉 추세 판정 데이터가 없습니다. 다음 자동 분석 실행 후 확인하세요.'));
+    why.append(elem('p','',`이평선: 5일 ${formatMa(x.ma5)} · 20일 ${formatMa(x.ma20)} · 200일 ${formatMa(x.ma200)} / 골든크로스: ${x.golden_cross===true?'발생':'해당 없음'} / 데드크로스: ${x.dead_cross===true?'발생':'해당 없음'}`));
+    card.append(top,slopeLine,detail,why);
+    const companyPanel=addCompanyPanel(card,x);
+    addChartExpander(card,x.code);
+    companyBtn.addEventListener('click',()=>{
+      companyPanel.open=!companyPanel.open;
+      if(companyPanel.open){const chart=card.querySelector('.chart-expander');if(chart)chart.open=true;}
+    });
+    frag.append(card);
+  }
+  out.append(frag);$('more').hidden=countShown>=candidates.length;
+}
+async function load(){
+  $('refresh').disabled=true;text($('status'),'분석 결과 불러오는 중...');
+  try{
+    const r=await fetch('./results.json?ts='+Date.now(),{cache:'no-store'});
+    if(!r.ok)throw Error('results.json HTTP '+r.status);
+    const d=await r.json();
+    if(!Array.isArray(d.rows))throw Error('데이터 형식이 올바르지 않습니다.');
+    dataRows=d.rows;infoDate=d.asof||'-';clearChartCacheIfDateChanged();countShown=20;displayBacktest(d.backtest);v6Render();
+    const expected=d.expected_asof||'-';
+    const lag=Number(d.lag_sessions||0);
+    const stale=d.data_status==='delayed' || (expected!=='-' && infoDate<expected);
+    const banner=$('freshness');banner.hidden=!stale;
+    if(stale){
+      text(banner,`⚠️ 최신 거래일 데이터 지연! 기대 거래일 ${expected}, 확보된 데이터 ${infoDate} (${lag}거래일 지연). 이 목록은 과거 종목 분석입니다. 오늘 장 마감 매수 판단에 사용하지 마세요.`);
+    }
+    const signalsReady=d.rows.some(x=>typeof x.ma_aligned==='boolean' && typeof x.golden_cross==='boolean');
+    const trendReady=d.rows.some(x=>Object.prototype.hasOwnProperty.call(TREND_LABELS,x.trend) && x.trend!=='unavailable');
+    const chartReady=d.chart_schema==='jongbe-ohlcv-v1' && Number(d.chart_count)===d.rows.length;
+    const note=(d.minor_version==='5.0'?'':' ⚠️ v5 데이터가 아닙니다. 자동 분석을 다시 실행하세요.')+(signalsReady?'':' ⚠️ 정배열·골든크로스 데이터가 아직 없습니다. 새 scanner.py로 분석을 다시 실행해 주세요.')+(trendReady?'':' ⚠️ 추세 색상은 아직 계산되지 않았습니다. v6.5 scanner.py로 분석을 다시 실행해 주세요.')+(chartReady?'':' ⚠️ 일봉 차트 데이터가 아직 게시되지 않았습니다. v6.5 scanner.yml까지 설치하고 분석을 다시 실행해 주세요.');
+    text($('status'),`데이터 기준일 ${infoDate} · 기대 거래일 ${expected} · 갱신 작업 ${d.updated||'-'} · 전체 ${fmt(d.universe_size||0)}종목 / 분석 유효 ${fmt(d.analyzed_count||0)}종목${note}`);
+  }catch(e){displayBacktest(null);dataRows=[];$('freshness').hidden=false;text($('freshness'),'⚠️ 분석 결과를 읽지 못했습니다. GitHub Actions 실행 상태를 확인하세요.');text($('status'),'⚠️ 분석 데이터를 읽지 못했습니다: '+e.message);}
+  finally{$('refresh').disabled=false;display();}
+}
+['query','viewmode','market','mafilter','trendfilter','minscore','minvalue','change','sort','position'].forEach(id=>
+  $(id).addEventListener(id==='query'?'input':'change',()=>{countShown=20;display();}));
+$('findstock').addEventListener('click',()=>{countShown=20;display();document.querySelector('.titlebar').scrollIntoView({behavior:'smooth',block:'start'});});
+$('query').addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();$('query').blur();$('findstock').click();}});
+$('more').addEventListener('click',()=>{countShown+=20;display();});
+$('refresh').addEventListener('click',load);
+load();
+
+// v6.2 UI: public GitHub Contents API (scores only); no API keys/stock quotations in the browser.
+let v6Rows=[],v6Loaded=null;
+function v6N(s){return String(s??'').normalize('NFKC').toLowerCase().replace(/\s+/g,'');}
+function v6Entry(s){const x=Number(s);return Number.isFinite(x)?x:null;}
+function v6Clock(dateString){try{return new Date(dateString).toLocaleString('ko-KR',{timeZone:'Asia/Seoul',year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'});}catch{return '-';}}
+function v6KstDate(){return new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Seoul',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());}
+function v6El(t,c,s){let e=document.createElement(t);if(c)e.className=c;if(s!==undefined)e.textContent=String(s);return e;}
+function v6Render(){
+  const q=v6N(document.getElementById('v6query').value);
+  const min=Number(document.getElementById('v6min').value);
+  const risk=document.getElementById('v6risk').value;
+  const list=v6Rows.filter(x=>{
+    if(q){return v6N(x.code).includes(q)||v6N(x.name).includes(q);}
+    return Number(x.score)>=min && (risk==='all'||(risk==='risk'? Boolean(x.caution): !x.caution));
+  }).sort((a,b)=>Number(b.score)-Number(a.score)||String(a.code).localeCompare(String(b.code)));
+  const parent=document.getElementById('v6results');parent.replaceChildren();
+  document.getElementById('v6shown').textContent=String(list.length);
+  document.getElementById('v6counter').textContent='검색 '+list.length+'개';
+  if(!v6Loaded){parent.append(v6El('p','v6-empty','아직 게시된 v6 장중 분석 점수가 없습니다. 평일 장중 GitHub Actions 실행 결과를 확인하세요.'));return;}
+  if(!list.length){parent.append(v6El('p','v6-empty',q?'검색된 종목이 없습니다. (현재 v6는 최대 55종목만 분석합니다.)':'조건을 만족하는 종목이 없습니다. 점수·위험 필터를 완화해 보세요.'));return;}
+  for(const x of list.slice(0,100)){
+    const card=v6El('article','v6-card');const head=v6El('div','v6-card-top');
+    const v6Btn=companyNameButton(x);
+    head.append(v6Btn,v6El('div','v6-score',x.score===null?'–':x.score+'점'));
+    card.append(head,v6El('div','v6-tag'+(x.caution?' v6-risk':''),x.caution||'점수 관찰 대상'));
+    const dayRow=dataRows.find(d=>d.code===x.code);
+    const trendDiv=v6El('div','trend-inline','확정 일봉 추세 (장중 판정 아님): ');
+    trendDiv.append(trendChip(dayRow||{}));card.append(trendDiv);
+    card.append(v6El('p','v6-inline','장중 점수와 일봉 추세의 기준일이 다를 수 있음 · 시세값 비공개 · 투자 추천 아님'));
+    const companyPanel=addCompanyPanel(card,{...x,market:dayRow?.market||''});
+    if(dayRow) addChartExpander(card,x.code);
+    v6Btn.addEventListener('click',()=>{
+      companyPanel.open=!companyPanel.open;
+      if(companyPanel.open){const chart=card.querySelector('.chart-expander');if(chart)chart.open=true;}
+    });
+    parent.append(card);
+  }
+}
+async function v6Load(){
+  const btn=document.getElementById('v6refresh');btn.disabled=true;
+  document.getElementById('v6status').textContent='GitHub에 저장된 장중 점수를 확인하고 있습니다…';
+  const api='https://api.github.com/repos/parksunghwa77/jongbe-scanner/contents/v6-scores.json?ref=main';
+  try{
+    const r=await fetch(api,{cache:'no-store',headers:{Accept:'application/vnd.github+json'}});
+    if(r.status===404){throw new Error('첫 장중 분석 점수가 아직 게시되지 않았습니다.');}
+    if(!r.ok){throw new Error('GitHub 데이터 요청 실패 (HTTP '+r.status+')');}
+    const payload=await r.json();
+    if(typeof payload.content!=='string')throw new Error('예상한 JSON 파일 형태가 아닙니다.');
+    const bin=atob(payload.content.replace(/\s/g,''));const bytes=Uint8Array.from(bin,c=>c.charCodeAt(0));
+    const d=JSON.parse(new TextDecoder('utf-8').decode(bytes));
+    if(d.schema!=='jongbe-v6.2-public-scores'||!Array.isArray(d.rows))throw new Error('v6.2 점수 파일 형식이 아닙니다.');
+    v6Rows=d.rows.filter(x=>x && /^\d{6}$/.test(String(x.code)) && typeof x.name==='string' && Number.isInteger(x.score) && x.score>=0 && x.score<=100)
+      .map(x=>({code:x.code,name:x.name,score:x.score,caution:typeof x.caution==='string'?x.caution:''}));
+    v6Loaded=d;
+    const stamp=d.generated_kst||'',asof=String(d.session_date||'');
+    document.getElementById('v6count').textContent=String(v6Rows.length);
+    document.getElementById('v6pass').textContent=String(v6Rows.filter(x=>x.score>=60&&!x.caution).length);
+    document.getElementById('v6status').textContent=`게시된 장중 관찰 점수 · 데이터 작업일 ${asof||'-'} · 작업 ${stamp||'-'} · 조회 ${d.quoted_count??'-'}/${d.requested_count??'-'}종목 · 출처: ${d.source||'관심종목+v5 후보'} · 실제 체결시각 미확인`;
+    document.getElementById('v6fresh').textContent=asof===v6KstDate()?
+      '⚠️ 오늘 생성된 점수이지만 실제 체결시각과 시세 지연 여부는 검증되지 않았습니다. 점수는 상승 확률이나 매수 추천이 아닙니다.':
+      '⚠️ 과거 장중 점수입니다. '+asof+' 기준이므로 현재 주가·당일 매매 판단에 사용하지 마세요.';
+  }catch(e){
+    v6Rows=[];v6Loaded=null;
+    document.getElementById('v6count').textContent='–';document.getElementById('v6pass').textContent='–';
+    document.getElementById('v6status').textContent='아직 표시할 v6 점수가 없습니다: '+e.message;
+    document.getElementById('v6fresh').textContent='⚠️ v6.1은 동작하지만 장중 점수를 웹에 공개하려면 제공된 v6.2 워크플로를 설치하고 실제 거래일 장중에 성공 실행해야 합니다. 기존 v5 데이터는 오른쪽 탭에서 확인할 수 있습니다.';
+  }finally{btn.disabled=false;v6Render();}
+}
+function v6Switch(kind){
+  const is6=kind==='v6';document.getElementById('v6panel').hidden=!is6;document.getElementById('v5panel').hidden=is6;
+  for(const [id,state] of [['tabv6',is6],['tabv5',!is6]]){let e=document.getElementById(id);e.classList.toggle('selected',state);e.setAttribute('aria-pressed',String(state));}
+  try{history.replaceState(null,'','#'+kind);}catch{}
+}
+document.getElementById('tabv6').addEventListener('click',()=>v6Switch('v6'));
+document.getElementById('tabv5').addEventListener('click',()=>v6Switch('v5'));
+['v6query','v6min','v6risk'].forEach(id=>document.getElementById(id).addEventListener(id==='v6query'?'input':'change',v6Render));
+document.getElementById('v6refresh').addEventListener('click',v6Load);
+v6Switch(location.hash==='#v5'?'v5':'v6');
+v6Load();
+
+</script>
+</body></html>
