@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="theme-color" content="#101827">
-  <title>종베 스캐너 v6.2 | 장중 관찰 · 일봉 분석</title>
+  <title>종베 스캐너 v6.2 · 5·20·200일선 표시</title>
   <style>
     :root{color-scheme:dark}*{box-sizing:border-box}
     body{margin:0;background:#101827;color:#f3f6fe;font-family:system-ui,-apple-system,"Noto Sans KR",sans-serif}
@@ -107,7 +107,7 @@
     <p class="v6-note">공개되는 정보는 종목코드·이름·산출 점수·위험 표시·조회 작업 시각만입니다. 나무증권 API 키·인증 토큰·원시 주가·거래량·거래대금은 웹에 게시하지 않습니다. 점수는 상승 확률이나 실전 수익 검증이 아닙니다. <b>v6 결과는 오후 2시 30분 장중 작업 완료 후</b> 게시되며 휴일에는 새 결과를 만들지 않습니다. GitHub 저장소가 공개라 점수는 다른 사람도 볼 수 있습니다.</p>
   </section>
   <section id="v5panel" aria-label="v5 전종목 일봉 검색" hidden>
-    <h2>v5.1 확정 일봉 검색</h2>
+    <h2>v5.1 확정 일봉 검색 · 5·20·200일선</h2>
   <div class="badge">⚠️ 장 마감 후 확정 일봉 · 실시간 아님</div>
   <p>코스피·코스닥 공개 일봉을 평가하고 과거 후보의 다음 거래일 변화를 함께 검증합니다. <b>점수는 상승 확률이나 매수 추천이 아닙니다.</b></p>
   <div class="bar"><button id="refresh" type="button">결과 새로고침</button><small>평일 18:15 및 월~토 09:30(KST) 재확인 예약 · 지연/실패 가능</small></div>
@@ -130,13 +130,14 @@
   <div class="titlebar"><h2>조건 검색 결과</h2><small id="counter">0개</small></div>
   <section id="results" aria-label="종목 검색 결과"></section>
   <div class="pager"><button id="more" type="button" hidden>20개 더 보기</button></div>
-  <p class="rules">점수 기준: 종가&gt;5일 평균선 +25점, 5일선&gt;20일선 +25점, 거래량&gt;이전 20거래일 평균의 1.5배 +20점, 당일 고저가 대비 종가 위치≥75% +20점, 당일 등락률 양수 +10점. 최대 100점. <b>거래대금은 KRX에서 제공한 실제 누적 거래대금</b>을 사용합니다. 거래정지·신규 상장 등 21거래일 자료가 불완전한 종목은 점수 계산에서 제외합니다. 우선주·스팩 등도 포함될 수 있습니다. 과거 결과의 다음날 종가 변화는 참고용 관찰값일 뿐 투자 수익이나 미래 성과를 보장하지 않습니다. 외국인·기관·프로그램 매매 분석 및 14:30 장중 실시간 검색은 제공하지 않습니다. FinanceData/marcap 원본은 갱신이 늦어질 수 있습니다. 화면의 <b>기준일과 기대 거래일</b>을 반드시 확인하세요. 최신 시세가 없을 때 표시되는 종목은 과거 기록입니다.</p>
+  <p class="rules">점수 기준: 종가&gt;5일 평균선 +25점, 5일선&gt;20일선 +25점, 거래량&gt;이전 20거래일 평균의 1.5배 +20점, 당일 고저가 대비 종가 위치≥75% +20점, 당일 등락률 양수 +10점. 최대 100점. <b>거래대금은 KRX에서 제공한 실제 누적 거래대금</b>을 사용합니다. 거래정지·신규 상장 등 최근 55거래일 자료가 불완전한 종목은 점수 계산에서 제외합니다. 200일선은 종가가 200거래일 연속 확보된 종목만 표시하며 부족하면 ‘자료 부족’으로 나타납니다. 이동평균선 표시는 점수 계산 기준을 변경하지 않습니다. 우선주·스팩 등도 포함될 수 있습니다. 과거 결과의 다음날 종가 변화는 참고용 관찰값일 뿐 투자 수익이나 미래 성과를 보장하지 않습니다. 외국인·기관·프로그램 매매 분석 및 14:30 장중 실시간 검색은 제공하지 않습니다. FinanceData/marcap 원본은 갱신이 늦어질 수 있습니다. 화면의 <b>기준일과 기대 거래일</b>을 반드시 확인하세요. 최신 시세가 없을 때 표시되는 종목은 과거 기록입니다.</p>
   </section>
 </main>
 <script>
 'use strict';
 const $ = id => document.getElementById(id);
 const fmt = n => Number(n).toLocaleString('ko-KR');
+const formatMa = v => (v===null || v===undefined || v==='' || !Number.isFinite(Number(v))) ? '자료 부족' : `${fmt(Math.round(Number(v)))}원`;
 const text = (el, s) => {el.textContent = String(s??'');return el;};
 const elem = (tag,cls,value) => {const a=document.createElement(tag);if(cls)a.className=cls;if(value!==undefined)text(a,value);return a;};
 let dataRows = [], countShown = 20, infoDate = '';
@@ -210,7 +211,8 @@ function display(){
     const detail=elem('div','details');
     [ `종가 ${fmt(x.price)}원`,`전일 대비 ${Number(x.change)>0?'+':''}${x.change}%`,
       `거래대금 ${fmt(x.value_eok)}억 원`,`거래량 ${x.volume_ratio}배`,
-      `종가 위치 ${x.close_position}%`,`5일선 ${fmt(x.ma5)}원` ].forEach(s=>detail.append(elem('div','',s)));
+      `종가 위치 ${x.close_position}%`,
+      `5일선 ${formatMa(x.ma5)}`,`20일선 ${formatMa(x.ma20)}`,`200일선 ${formatMa(x.ma200)}` ].forEach(s=>detail.append(elem('div','',s)));
     card.append(top,detail);frag.append(card);
   }
   out.append(frag);$('more').hidden=countShown>=candidates.length;

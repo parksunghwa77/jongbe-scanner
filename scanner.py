@@ -27,7 +27,8 @@ import exchange_calendars as xcals
 ROOT = Path(__file__).resolve().parent
 OUT = ROOT / 'results.json'
 KST = ZoneInfo('Asia/Seoul')
-HISTORY_DAYS = 55
+HISTORY_DAYS = 200
+REQUIRED_VALID_DAYS = 55  # 기존 v5와 동일한 분석대상/점수 기준 유지
 BACKTEST_DAYS = 15
 BACKTEST_TOP_N = 10
 MAX_STALE_CALENDAR_DAYS = 12
@@ -84,10 +85,8 @@ def download_year(year: int) -> pd.DataFrame:
 
 
 def get_data(reference: dt.date) -> pd.DataFrame:
-    years = [reference.year]
-    # 1~3월에는 지난해의 21거래일이 필요할 수 있음.
-    if reference.month <= 3:
-        years.append(reference.year - 1)
+    # 200거래일 평균 계산을 위해 전년도 데이터도 함께 확보한다.
+    years = [reference.year, reference.year - 1]
     frames = [download_year(y) for y in years]
     df = pd.concat(frames, ignore_index=True)
     columns = {'Date','Code','Name','Market','Open','High','Low','Close','Volume','Amount'}
@@ -140,7 +139,12 @@ def analyze(df: pd.DataFrame, now: dt.datetime) -> dict:
     latest_date, latest = history[-1]
     close = pd.concat([frame['종가'].rename(day) for day,frame in history],axis=1)
     volume = pd.concat([frame['거래량'].rename(day) for day,frame in history],axis=1)
-    valid = (close.notna().all(axis=1)&(close>0).all(axis=1)&volume.notna().all(axis=1))
+    # 종목 유효성은 기존 v5의 최근 55거래일 기준을 그대로 유지한다.
+    # 200일치가 모자라도 v5 점수를 계산하고, 200일선은 None으로 표기한다.
+    recent_close = close.iloc[:, -REQUIRED_VALID_DAYS:]
+    recent_volume = volume.iloc[:, -REQUIRED_VALID_DAYS:]
+    valid = (recent_close.notna().all(axis=1)&(recent_close>0).all(axis=1)
+             &recent_volume.notna().all(axis=1))
     close = close.loc[valid]
     volume = volume.loc[valid]
     latest = latest.loc[latest.index.intersection(close.index)].copy()
@@ -151,7 +155,12 @@ def analyze(df: pd.DataFrame, now: dt.datetime) -> dict:
         raise RuntimeError(f'21거래일 분석에 적합한 종목이 {len(latest)}개뿐임. 이전 배포 유지.')
     ma5=close.iloc[:,-5:].mean(axis=1)
     ma20=close.iloc[:,-20:].mean(axis=1)
-    prev_volume=volume.iloc[:,:-1].mean(axis=1)
+    # 200거래일 종가가 모두 존재하고 양수인 경우에만 MA200을 계산.
+    closes200 = close.iloc[:, -200:]
+    ma200 = closes200.where(closes200 > 0).mean(axis=1, skipna=False)
+    # 이전 v5에서는 55일 창의 당일을 제외한 54거래일 평균거래량을 썼음.
+    # 새로운 200일 데이터 확보 때문에 기존 점수가 바뀌지 않도록 그 창을 고정.
+    prev_volume=volume.iloc[:, -REQUIRED_VALID_DAYS:-1].mean(axis=1)
     ratio=(latest['거래량']/prev_volume.where(prev_volume>0)).fillna(0).clip(upper=100000)
     highlow=(latest['고가']-latest['저가']).replace(0, float('nan'))
     pos=((latest['종가']-latest['저가'])*100/highlow).fillna(50).clip(0,100)
@@ -168,6 +177,7 @@ def analyze(df: pd.DataFrame, now: dt.datetime) -> dict:
             'value_eok':round(float(r['거래대금'])/1e8,1),
             'close_position':round(float(pos.loc[code]),1),'volume_ratio':round(float(ratio.loc[code]),2),
             'ma5':round(float(ma5.loc[code]),2), 'ma20':round(float(ma20.loc[code]),2),
+            'ma200':round(float(ma200.loc[code]),2) if pd.notna(ma200.loc[code]) else None,
             'score':int(score.loc[code]),
             'watch':bool(score.loc[code]>=70 and float(r['거래대금'])>=1e10 and 0<float(change.loc[code])<=15 and float(pos.loc[code])>=60),
             'chase_risk':bool(float(change.loc[code])>=15)
@@ -179,6 +189,7 @@ def analyze(df: pd.DataFrame, now: dt.datetime) -> dict:
         'asof':latest_date,'updated':now.strftime('%Y-%m-%d %H:%M KST'),
         'version':5, 'minor_version':'5.0', 'source':'FinanceData/marcap',
         'universe_size':int(len(latest)),
+        'ma200_count':int(ma200.notna().sum()),
         'analyzed_count':len(rows),'history_days':HISTORY_DAYS,'rows':rows,
         'notice':'서드파티 공개 KRX 데이터셋 기반의 장 마감 후 분석. 실시간 시세 아님. 점수는 상승 확률 아님.'
     }
