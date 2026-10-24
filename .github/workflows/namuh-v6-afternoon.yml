@@ -1,0 +1,264 @@
+name: 종베 스캐너 v6 - 오후 2시 30분 관심종목 관찰
+
+# 기존 scanner.yml / GitHub Pages 배포에는 영향 없음.
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '30 5 * * 1-5' # KST 평일 14:30 (UTC 05:30); GitHub 예약 지연 가능
+
+permissions:
+  contents: read
+
+jobs:
+  scan:
+    name: v6 read-only afternoon scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      NHPLUG_APP_KEY: ${{ secrets.NAMUH_APP_KEY }}
+      NHPLUG_APP_SECRET: ${{ secrets.NAMUH_APP_SECRET_KEY }}
+      NHPLUG_BASE_URL: https://api.nhplug.com:8443
+      NHPLUG_AUTH_URL: https://api.nhplug.com:8443
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install read-only SDK and exchange calendar
+        run: python -m pip install --disable-pip-version-check nhplug exchange_calendars
+      - name: Read-only afternoon watchlist scan
+        shell: bash
+        run: |
+          python - <<'PY'
+          """종베 스캐너 v6: 지정 종목의 NHPLUG REST 현재가를 조회하는 14:30 관찰 실험.
+
+          주문 기능 없음. 공개 GitHub Pages/리포지토리에 시세/인증키를 자동 게시하지 않음.
+          본 프로그램은 전 종목 실시간 스트리밍/5분봉/체결강도 검색기가 아닙니다.
+          """
+          import json
+          import os
+          import re
+          import sys
+          from datetime import datetime, date, time, timedelta
+          from decimal import Decimal, InvalidOperation
+          from pathlib import Path
+          from zoneinfo import ZoneInfo
+
+          KST = ZoneInfo("Asia/Seoul")
+          # 첫 개발 단계는 관심종목/전날 후보를 합한 소규모 시범 검색.
+          DEFAULT = [
+              ("005930", "삼성전자"), ("000660", "SK하이닉스"),
+              ("009150", "삼성전기"), ("042700", "한미반도체"),
+              ("403870", "HPSP"), ("240810", "원익IPS"),
+              ("095610", "테스"), ("084110", "휴온스글로벌"),
+              ("200670", "휴메딕스"), ("035420", "NAVER"),
+              ("006400", "삼성SDI"), ("105560", "KB금융"),
+          ]
+          MAX_CODES = 55
+          MAX_SOURCE_AGE_DAYS = 7
+
+
+          def number(v):
+              if v is None or str(v).strip() in ("", "-"):
+                  return None
+              try:
+                  x = Decimal(str(v).replace(",", "").replace("%", "").strip())
+                  return x if x.is_finite() else None
+              except (InvalidOperation, ValueError):
+                  return None
+
+
+          def integer(v):
+              x = number(v)
+              return int(x) if x is not None else None
+
+
+          def candidates(now):
+              """최근 v5 일봉 점수표의 상위 종목 + 관심종목. 원본이 오래되면 무시."""
+              result = list(DEFAULT)
+              path = Path("results.json")
+              used = "기본 관심종목"
+              if path.exists():
+                  try:
+                      obj = json.loads(path.read_text(encoding="utf-8"))
+                      asof = date.fromisoformat(obj.get("asof", ""))
+                      age = (now.date() - asof).days
+                      if 0 <= age <= MAX_SOURCE_AGE_DAYS:
+                          for item in (obj.get("rows") or [])[:300]:
+                              code = str(item.get("code", "")).zfill(6)
+                              name = str(item.get("name", code))[:24]
+                              if (re.fullmatch(r"\d{6}", code) and
+                                      item.get("score", 0) >= 50):
+                                  result.append((code, name))
+                              if len({x[0] for x in result}) >= MAX_CODES:
+                                  break
+                          used = f"기본 관심종목 + v5 일봉 후보({asof}; 분석 종목 제한)"
+                      else:
+                          used = f"기본 관심종목만 (v5 일봉 {asof} 오래됨)"
+                  except (OSError, ValueError, TypeError, AttributeError, KeyError):
+                      used = "기본 관심종목만 (v5 결과 읽기 실패)"
+              seen = set()
+              uniq = []
+              for code, name in result:
+                  if code not in seen:
+                      seen.add(code)
+                      uniq.append((code, name))
+                  if len(uniq) == MAX_CODES:
+                      break
+              return uniq, used
+
+
+          def market_session(now):
+              if now.weekday() >= 5:
+                  return False
+              try:
+                  import exchange_calendars as ec
+                  # 주식시장 휴장일에는 후보 추천용 순위를 만들지 않음.
+                  return bool(ec.get_calendar("XKRX").is_session(now.date().isoformat()))
+              except Exception:
+                  # 달력을 확인하지 못할 때는 안전하게 장중 후보 발표를 보류.
+                  return False
+
+
+          def parse_quote(obj, code, name):
+              if not isinstance(obj, dict):
+                  return None
+              out = obj.get("Output_0")
+              if isinstance(out, list):
+                  out = out[0] if out else None
+              if not isinstance(out, dict):
+                  return None
+              price = number(out.get("stck_prpr"))
+              if price is None or price <= 0:
+                  return None
+              open_ = number(out.get("stck_oprc"))
+              high = number(out.get("stck_hgpr"))
+              low = number(out.get("stck_lwpr"))
+              change = number(out.get("prdy_ctrt"))
+              volume = integer(out.get("acml_vol"))
+              traded = number(out.get("acml_tr_pbmn"))  # 단위를 미확인했으므로 원화 환산하지 않음.
+              pos = None
+              if high is not None and low is not None and high > low and low <= price <= high:
+                  pos = (price - low) * 100 / (high - low)
+              has_all = (open_ is not None and open_ > 0 and change is not None and
+                         pos is not None and volume is not None and volume >= 0 and
+                         traded is not None and traded >= 0)
+              return {
+                  "code": code, "name": name, "price": price,
+                  "open": open_, "high": high, "low": low,
+                  "pct": change, "volume": volume, "traded_raw": traded,
+                  "position": pos, "complete": has_all,
+              }
+
+
+          def enrich_scores(data):
+              complete = [r for r in data if r["complete"]]
+              desc = sorted((r["traded_raw"] for r in complete), reverse=True)
+              # '거래대금 상위'는 *검색한 55개 이내 목록 안*에서만 비교한다.
+              # raw 값의 API 단위는 미확인; 다른 통화 또는 종목시장 합산 금지.
+              cutoff = desc[max(0, (len(desc) - 1) // 4)] if desc else None
+              for r in data:
+                  if not r["complete"]:
+                      r["score"] = None
+                      r["caution"] = "필수 시세 필드 누락"
+                      continue
+                  pct = r["pct"]
+                  risky = pct >= Decimal("15") or pct <= Decimal("-5")
+                  r["score"] = (
+                      (25 if r["price"] >= r["open"] else 0) +
+                      (30 if r["position"] >= Decimal("75") else 0) +
+                      (25 if Decimal("0") < pct <= Decimal("12") else 0) +
+                      (10 if r["volume"] >= 100_000 else 0) +
+                      (10 if cutoff is not None and r["traded_raw"] >= cutoff else 0)
+                  )
+                  r["caution"] = "급변 위험" if risky else ""
+              return sorted(data, key=lambda r: (r["score"] is None, -(r["score"] or 0),
+                                                 -(r["traded_raw"] or 0), r["code"]))
+
+
+          def summary_table(rows):
+              header = "| 종목 | 현재가* | 등락률* | 고가 위치* | 관찰점수 | 비고 |\n|---|---:|---:|---:|---:|---|"
+              lines = [header]
+              for r in rows:
+                  fmt = lambda x, suffix="": (f"{x:,.0f}{suffix}" if x is not None else "미제공")
+                  pct = f"{r['pct']:+.2f}%" if r["pct"] is not None else "미제공"
+                  pos = fmt(r["position"], "%")
+                  score = str(r["score"]) if r["score"] is not None else "평가불가"
+                  name = str(r["name"]).replace("|", " ")[:24]
+                  lines.append(f"| {name} ({r['code']}) | {fmt(r['price'])} | {pct} | {pos} | {score} | {r['caution'] or '-'} |")
+              return "\n".join(lines)
+
+
+          def write_summary(text):
+              target = os.getenv("GITHUB_STEP_SUMMARY")
+              if target:
+                  # secrets/token/raw exception are never included.
+                  with open(target, "a", encoding="utf-8") as f:
+                      f.write(text + "\n")
+              else:
+                  print(text)
+
+
+          def main():
+              now = datetime.now(KST)
+              event = os.getenv("GITHUB_EVENT_NAME", "workflow_dispatch")
+              scheduled = event == "schedule"
+              session = market_session(now)
+              in_window = session and time(14, 25) <= now.time() <= time(15, 10)
+              if scheduled and not in_window:
+                  write_summary(f"## v6 장중 관찰 보류\n{now:%Y-%m-%d %H:%M KST} — 휴장일 또는 예약 실행 지연으로 장중 유효 시간대를 벗어남. 시세 조회하지 않음.")
+                  return
+              if not os.getenv("NHPLUG_APP_KEY") or not os.getenv("NHPLUG_APP_SECRET"):
+                  print("FAIL: GitHub Secrets NAMUH_APP_KEY / NAMUH_APP_SECRET_KEY를 확인하세요.")
+                  sys.exit(1)
+              from nhplug import call
+              stocks, source = candidates(now)
+              rows = []
+              bad = []
+              for code, name in stocks:
+                  try:
+                      resp = call("/krstock/quote/v1/currentPrice", {
+                          "iem_cd": code, "market_cd": "UNT",
+                      })
+                      parsed = parse_quote(resp, code, name)
+                      if parsed is None:
+                          bad.append(code)
+                      else:
+                          rows.append(parsed)
+                  except Exception:
+                      # API 원문/예외 텍스트에는 인증 관련 정보가 있을 수 있어 절대 출력하지 않음.
+                      bad.append(code)
+              if len(rows) < 2 or len(rows) < len(stocks) * 0.70:
+                  print(f"FAIL: 시세 조회 부족 — 성공 {len(rows)}/{len(stocks)}. 민감한 오류 원문은 로그에 남기지 않습니다.")
+                  sys.exit(1)
+              rows = enrich_scores(rows)
+              complete = [r for r in rows if r["complete"]]
+              show_rank = in_window
+              title = "장중 관찰 결과" if show_rank else "장외/휴일 연결 시험 — 과거 시세일 수 있음"
+              head = (f"## 종베 스캐너 v6 · {title}\n\n"
+                      f"- **조회 작업 시각**: {now:%Y-%m-%d %H:%M:%S KST} (개별 체결 시각 아님)\n"
+                      f"- **대상**: {source}; 최대 {MAX_CODES}종목 (코스피·코스닥 전 종목 검색 아님)\n"
+                      f"- **시세 조회**: {len(rows)}/{len(stocks)} 종목; 점수평가 가능 {len(complete)}종목\n"
+                      "- **방식**: NHPLUG REST 통합시장(UNT), 읽기 전용. 5분봉/체결강도/실시간 스트리밍 미구현.\n"
+                      "- **주의**: 점수는 임의 관찰 조건이며 상승 확률, 매수 추천 또는 실거래 수익 검증이 아님.\n"
+                      "- **시장 상태**: 거래소 달력 및 작업 시각 기준의 참고 판정; API 제공 시세의 실제 체결 시각은 아직 미검증.\n"
+                      "\n")
+              if show_rank:
+                  selected = [r for r in rows if r["score"] is not None and
+                              r["score"] >= 60 and not r["caution"]]
+                  text = head + (f"**60점 이상 관찰 후보: {len(selected)}종목**\n\n" +
+                                 (summary_table(selected[:15]) if selected else "관찰 조건 충족 종목 없음.\n") +
+                                 "\n\n*주가는 조회된 값으로, 실제 체결 시각·시세 지연 여부를 추가 검증해야 합니다. 거래대금은 API 원값의 상대순위만 점수에 사용했습니다.*")
+              else:
+                  text = head + ("**장중 종목 순위는 표시하지 않습니다.** 테스트 실행은 조회/필드 구성 확인만 가능합니다.\n\n" +
+                                 f"- 평가 필드(시가·고가·저가·등락률·거래량·거래대금) 완비: {len(complete)}/{len(rows)}\n" +
+                                 "- 다음 정규 거래일 장중 예약 실행에서 종가매매 후보 순위를 확인하세요.\n")
+              if bad:
+                  text += f"\n\n- 시세 조회 실패 코드 수: {len(bad)} (일부 API 제한 또는 종목코드 확인 필요)\n"
+              write_summary(text)
+              print(f"PASS: 조회 {len(rows)}/{len(stocks)}, 평가 완비 {len(complete)}; 장중 평가 {show_rank}; 종목 순위는 실행 요약(Summary)에 표시")
+
+
+          if __name__ == "__main__":
+              main()
+          PY
