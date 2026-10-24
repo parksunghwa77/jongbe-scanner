@@ -2,10 +2,10 @@
 <html lang="ko">
 <head>
   <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-  <meta name="theme-color" content="#101827">
-  <title>종베 스캐너 v6.6 · 자동 차트와 지지·저항</title>
+  <meta name="theme-color" content="#f4f8ff">
+  <title>종베 스캐너 v6.7 · 밝은 차트·확대축소·5분봉</title>
   <style>
-    :root{color-scheme:dark}*{box-sizing:border-box}
+    :root{color-scheme:light}*{box-sizing:border-box}
     body{margin:0;background:#101827;color:#f3f6fe;font-family:system-ui,-apple-system,"Noto Sans KR",sans-serif}
     main{max-width:800px;margin:auto;padding:20px 16px 48px}
     h1{font-size:29px;margin:20px 0 12px}h2{font-size:18px;margin:0}
@@ -127,10 +127,58 @@
     .company-links{display:flex;flex-wrap:wrap;gap:11px;font-size:12px;margin:8px 0}
     .company-load{color:#c6dafa;font-size:13px}
     @media(max-width:370px){.company-grid{grid-template-columns:1fr}}
+
+    /* v6.7: 햇빛 아래서도 읽기 좋은 밝은 화면 */
+    body{background:#f3f7fd;color:#172943}
+    p,small,.muted{color:#536987}
+    .app-title span{color:#305fb1}
+    .meta,.performance,.card,.trend-legend,.v6-meta,.v6-card,.v6-stat{background:#fff;border-color:#d0dced;color:#233b57;box-shadow:0 2px 8px #1b376012}
+    .details,.trend-inline,.trend-line,.performance p,.rules,.company-note,.v6-note,.v6-inline{color:#4b617e}
+    .filters,.rules,.v6-hero{background:#e9f1fc;border-color:#c5d8f0;color:#203c60}
+    .v6-hero{background:linear-gradient(145deg,#eef5ff,#deecfc)}
+    label{color:#3b526e}
+    input,select{background:#fff;color:#182b46;border-color:#adc1dc}
+    .badge,.status-pill{background:#fff0c6;color:#85520f;border:1px solid #eac980}
+    .fresh-alert,.v6-warn{background:#fff4df;color:#80501c;border-color:#e6ac53}
+    .trend-explain{border-color:#d4e3f3;color:#485d77}
+    .trend-explain summary,.trend-legend h3{color:#183250}
+    .switcher button{background:#e1eaf8;color:#2c4770;border-color:#abc6e7}
+    .switcher button.selected{background:#386fd8;color:#fff;border-color:#3563b9;box-shadow:0 1px 3px #b2c4e2}
+    .pill{background:#e3edfb;color:#345780}
+    .alertpill{background:#ffe4ce;color:#995122}
+    .goldenpill{background:#d5f4e5;color:#156b4d}
+    .score,.v6-stat strong,.v6-card .v6-score,.performance strong{color:#137957}
+    .v6-tag{background:#e0ecfb;color:#2d4f7b}.v6-risk{background:#ffe2d8;color:#b04832}
+    .v6-empty{color:#47617d;border-color:#adc0d8}
+    .company-title{color:#17395c;text-decoration-color:#5794df}
+    .company-panel{background:#f4f8fd;border-color:#bfd2e8}
+    .company-panel>summary,.company-grid dd{color:#24456b}
+    .company-grid dt,.company-load{color:#577390}
+    .company-grid>div{border-color:#d6e2ef}
+    .chart-inline{background:#fff;border-color:#c3d6eb}
+    .chart-inline-title{color:#23466e;border-color:#d4e2f3;background:#f1f7ff}
+    .chart-scroll{background:#fff;border-color:#c7d9ec;touch-action:pan-y;overscroll-behavior-x:contain}
+    .chart-caption,.chart-detail,.chart-legend{color:#49627f}
+    .chart-level{background:#f1f7fe;border-color:#c3d4e8;color:#38587a}
+    .chart-level.resistance{color:#aa6912;border-color:#e0ac56}
+    .chart-level.support{color:#087853;border-color:#7acaa5}
+    .chart-level.breakout{background:#d5f6e5;color:#087b50;border-color:#7acaa5}
+    .chart-level.breakdown{background:#ffeced;color:#aa394d;border-color:#e7a0a9}
+    .chart-times button,.chart-modes button,.chart-zoom button{background:#eaf2ff;color:#28569a;border:1px solid #bbd1ef;padding:8px 11px;font-size:13px;border-radius:8px}
+    .chart-times button.active,.chart-modes button.active{background:#376fdb;color:white;border-color:#2f64c8}
+    .chart-modes{display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap}
+    .chart-zoom{display:flex;align-items:center;gap:7px;flex-wrap:wrap;margin:8px 0 11px}
+    .chart-zoom small{font-size:12px}
+    .chart-zoom button{font-size:16px;padding:5px 12px;font-weight:750}
+    .chart-minute-container{min-height:460px;border:1px solid #cadcf1;border-radius:10px;overflow:hidden;background:#fff}
+    .chart-minute-container .tradingview-widget-container{width:100%;height:435px}
+    .chart-provider-caption{color:#506987;font-size:12px;line-height:1.6;margin:9px 0}
+    a{color:#2359b5}
+    @media(max-width:370px){.chart-modes button{padding:8px 9px}}
   </style>
 </head>
 <body><main>
-  <h1 class="app-title">📈 종베 스캐너 <span>v6.6</span></h1>
+  <h1 class="app-title">📈 종베 스캐너 <span>v6.7</span></h1>
   <div class="status-pill">🔎 읽기 전용 · 투자 추천 아님</div>
   <nav class="switcher" aria-label="분석 화면 선택">
     <button id="tabv6" type="button" class="selected" aria-pressed="true">v6 장중 관찰</button>
@@ -166,7 +214,7 @@
     <h2>확정 일봉 전종목 · 정배열·골든크로스·추세 색상 검색</h2>
   <div class="badge">⚠️ 장 마감 후 확정 일봉 · 실시간 아님</div>
   <p>코스피·코스닥 공개 일봉을 평가하고 과거 후보의 다음 거래일 변화를 함께 검증합니다. <b>점수는 상승 확률이나 매수 추천이 아닙니다.</b></p>
-  <p class="chart-caption">📈 <b>각 종목 카드에 주가 차트가 자동으로 보입니다.</b> 스크롤하면 차트가 자동 로딩됩니다. 🏢 회사 이름을 누르면 기업 기본정보가 열립니다. 차트에는 5·20·200일선, 거래량, 최근 20거래일 지지·저항 참고선과 종가 돌파 표시가 있습니다. 실시간 시세가 아닙니다.</p>
+  <p class="chart-caption">📈 <b>각 종목 카드에 주가 차트가 자동으로 보입니다.</b> 1일봉·5분봉 전환과 두 손가락 확대·축소, 밝은 화면을 지원합니다. 스크롤하면 차트가 자동 로딩됩니다. 🏢 회사 이름을 누르면 기업 기본정보가 열립니다. 차트에는 5·20·200일선, 거래량, 최근 20거래일 지지·저항 참고선과 종가 돌파 표시가 있습니다. 실시간 시세가 아닙니다.</p>
   <div class="bar"><button id="refresh" type="button">결과 새로고침</button><small>평일 18:15 및 월~토 09:30(KST) 재확인 예약 · 지연/실패 가능</small></div>
   <div class="meta" id="status" role="status" aria-live="polite">분석 데이터 확인 중...</div>
   <div class="fresh-alert" id="freshness" role="alert" hidden></div>
@@ -234,7 +282,7 @@ function displayBacktest(bt){
 
 /* v6.5 차트: 공개 확정 일봉 데이터만 로드. 시세 제공 API 토큰을 브라우저에 전달하지 않는다. */
 const chartBundles = new Map();
-const chartColors = {resistance:'#f1bc65',support:'#73e3b2',breakout:'#8ce8b6',up:'#ef667a',down:'#5ba6f8',ma5:'#63afff',ma20:'#ffa55b',ma200:'#c4a1fa',volume:'#60799d',grid:'#33465d',text:'#acc1d9',golden:'#73eac2',dead:'#ffb180'};
+const chartColors = {resistance:'#bc7614',support:'#12805f',breakout:'#047857',up:'#e34e61',down:'#2474d9',ma5:'#1b62ca',ma20:'#e47d13',ma200:'#9d5de0',volume:'#8294b5',grid:'#d7e2f0',text:'#425b78',golden:'#129e6a',dead:'#e17934'};
 let chartDateVersion='';
 function clearChartCacheIfDateChanged(){
   if(chartDateVersion!==infoDate){chartBundles.clear();chartDateVersion=infoDate;}
@@ -247,7 +295,7 @@ async function getChartSeries(code){
   if(!chartBundles.has(prefix)){
     const promise=(async()=>{
       const r=await fetch(`./charts/${prefix}.json?asof=${encodeURIComponent(infoDate)}`,{cache:'no-store'});
-      if(!r.ok)throw Error(r.status===404?'차트 데이터가 아직 배포되지 않았습니다. v6.5 scanner.yml 설치 후 분석을 실행하세요.':`차트 파일을 불러오지 못했습니다 (HTTP ${r.status}).`);
+      if(!r.ok)throw Error(r.status===404?'차트 데이터가 아직 배포되지 않았습니다. GitHub Actions scanner.yml 실행 결과를 확인하세요.':`차트 파일을 불러오지 못했습니다 (HTTP ${r.status}).`);
       const bundle=await r.json();
       if(bundle.schema!=='jongbe-ohlcv-v1'||bundle.asof!==infoDate||!bundle.stocks)throw Error('차트와 종목 목록의 기준일이 일치하지 않습니다. 자동 분석을 다시 실행해 주세요.');
       return bundle;
@@ -392,7 +440,55 @@ function buildChart(parent,rows,code){
   scroller.append(canvas);
   const infobar=elem('div','chart-detail');
   const caption=elem('div','chart-caption',`📅 확정 일봉 기준일 ${infoDate} · 자료기간 ${rows[0][0]}~${rows[rows.length-1][0]} · 지지/저항은 기준일 이전 20거래일의 최고가·최저가로 계산하는 단순 참고선입니다. 기준일 종가가 이전 20일 고가를 넘으면 돌파로 표시합니다. 가격 돌파가 미래 상승이나 매수를 보장하지 않습니다. 손가락으로 차트를 좌우로 밀고 봉을 눌러 확인하세요.`);
-  parent.append(controls,srInfo,legend,scroller,infobar,caption);
+  // v6.7: 확정 1일봉은 자체 차트, 5분봉은 공개 외부 제공 차트.
+  // 브라우저에 NH투자증권 인증키를 전달하거나 일봉으로 가짜 5분봉을 만들지 않는다.
+  const modeBar=elem('div','chart-modes');
+  const dailyBtn=elem('button','active','📆 1일봉');dailyBtn.type='button';dailyBtn.setAttribute('aria-pressed','true');
+  const minuteBtn=elem('button','','⏱ 5분봉');minuteBtn.type='button';minuteBtn.setAttribute('aria-pressed','false');
+  modeBar.append(dailyBtn,minuteBtn);
+  const dailyBox=elem('div');
+  const zoomBar=elem('div','chart-zoom');
+  const zoomOut=elem('button','','−');zoomOut.type='button';zoomOut.setAttribute('aria-label','차트 축소');
+  const zoomIn=elem('button','','+');zoomIn.type='button';zoomIn.setAttribute('aria-label','차트 확대');
+  const zoomReset=elem('button','','기본');zoomReset.type='button';
+  const zoomHint=elem('small','','두 손가락으로 확대·축소 · 한 손가락으로 좌우 이동');
+  zoomBar.append(zoomOut,zoomIn,zoomReset,zoomHint);
+  dailyBox.append(controls,srInfo,legend,zoomBar,scroller,infobar,caption);
+  const minuteBox=elem('section');minuteBox.hidden=true;
+  const providerNotice=elem('p','chart-provider-caption','5분봉은 TradingView 외부 차트입니다. 표시 가격·시간·제공 여부가 자체 확정 일봉과 다를 수 있고, 지연·제한될 수 있습니다. 실시간 매매 근거로 단독 사용하지 마세요.');
+  const providerWrap=elem('div','chart-minute-container');
+  const providerLink=elem('a','','TradingView에서 차트 직접 확인 ↗');
+  providerLink.href='https://kr.tradingview.com/symbols/KRX-'+encodeURIComponent(code)+'/';
+  providerLink.target='_blank';providerLink.rel='noopener noreferrer';
+  minuteBox.append(providerNotice,providerWrap,elem('p','chart-provider-caption','외부 차트가 비어 있거나 5분봉을 제공하지 않으면 이 링크를 사용하세요: '),providerLink);
+  parent.append(modeBar,dailyBox,minuteBox);
+  let minuteLoaded=false;
+  function loadMinute(){
+    if(minuteLoaded)return;
+    minuteLoaded=true;
+    const tv=elem('div','tradingview-widget-container');
+    const tvInner=elem('div','tradingview-widget-container__widget');
+    tv.style.height='435px';tv.style.width='100%';tvInner.style.height='100%';
+    tv.append(tvInner);providerWrap.replaceChildren(tv);
+    const options={autosize:true,symbol:'KRX:'+code,interval:'5',timezone:'Asia/Seoul',theme:'light',style:'1',locale:'kr',allow_symbol_change:false,hide_top_toolbar:false,hide_side_toolbar:true,hide_legend:false,hide_volume:false,withdateranges:false,save_image:false,backgroundColor:'#ffffff',gridColor:'rgba(50,80,130,0.08)',support_host:'https://www.tradingview.com'};
+    const script=document.createElement('script');
+    script.type='text/javascript';script.src='https://s3.tradingview.com/external-embedding/embed-widget-advanced-chart.js';script.async=true;
+    script.textContent=JSON.stringify(options);tv.append(script);
+    script.addEventListener('error',()=>{providerWrap.prepend(elem('p','chart-error','외부 차트 연결 실패. 아래 TradingView 링크에서 확인해 주세요.'));});
+  }
+  dailyBtn.addEventListener('click',()=>{
+    dailyBox.hidden=false;minuteBox.hidden=true;
+    dailyBtn.classList.add('active');minuteBtn.classList.remove('active');
+    dailyBtn.setAttribute('aria-pressed','true');minuteBtn.setAttribute('aria-pressed','false');
+    requestAnimationFrame(()=>paint(false));
+  });
+  minuteBtn.addEventListener('click',()=>{
+    dailyBox.hidden=true;minuteBox.hidden=false;
+    dailyBtn.classList.remove('active');minuteBtn.classList.add('active');
+    dailyBtn.setAttribute('aria-pressed','false');minuteBtn.setAttribute('aria-pressed','true');
+    loadMinute();
+  });
+  let zoomScale=1;
   let currentPeriod=63;
   let selected=null;
   let drawResult=null;
@@ -402,7 +498,7 @@ function buildChart(parent,rows,code){
     b.addEventListener('click',()=>{
       currentPeriod=n;selected=null;
       for(const k of controls.children){k.classList.toggle('active',k===b);k.setAttribute('aria-pressed',String(k===b));}
-      paint();
+      paint(true);
     });controls.append(b);
   }
   function selectedInfo(row){
@@ -413,12 +509,14 @@ function buildChart(parent,rows,code){
     if(sr?.breakdown)signal.push(`20거래일 지지 ${fmt(sr.support)}원 종가 이탈`);
     return `${row[0]} | 시가 ${fmt(row[1])} / 고가 ${fmt(row[2])} / 저가 ${fmt(row[3])} / 종가 ${fmt(row[4])}원 · 거래량 ${fmt(row[5])}주${signal.length?' · '+signal.join(', '):''}`;
   }
-  function paint(){
+  function paint(scrollRight=false){
+    if(dailyBox.hidden)return;
+    const oldScroll=scroller.scrollLeft;
     const view=rows.slice(-currentPeriod);
     if(!view.length){text(infobar,'차트 자료 없음');return;}
     const desired=currentPeriod<=21?13:(currentPeriod<=63?9:(currentPeriod<=126?7:5.5));
     const gutter=58, right=15;
-    const width=Math.max(Math.floor(scroller.clientWidth)-2,Math.ceil(gutter+right+view.length*desired));
+    const width=Math.max(Math.floor(scroller.clientWidth)-2,Math.ceil(gutter+right+view.length*desired*zoomScale));
     const height=330;
     canvas.style.width=width+'px';canvas.style.height=height+'px';
     const ratio=Math.min(window.devicePixelRatio||1,2);
@@ -435,7 +533,7 @@ function buildChart(parent,rows,code){
     const mapY=x=>bottom-((x-min)/(max-min))*(bottom-top);
     const maxVolume=Math.max(1,...view.map(r=>r[5]));
     const center=i=>gutter+span*(i+0.5);
-    g.fillStyle='#101c30';g.fillRect(0,0,width,height);
+    g.fillStyle='#ffffff';g.fillRect(0,0,width,height);
     g.font='11px system-ui';g.lineWidth=1;g.textAlign='right';g.textBaseline='middle';
     for(let k=0;k<=4;k++){
       const y=top+(bottom-top)*k/4;
@@ -491,17 +589,17 @@ function buildChart(parent,rows,code){
     const step=Math.max(1,Math.ceil(view.length/5));
     for(let i=0;i<view.length;i+=step)g.fillText(view[i][0].slice(5),center(i),324);
     if(selected!==null&&selected>=0&&selected<view.length){
-      const x=center(selected);g.setLineDash([3,4]);g.strokeStyle='#d9e3f9';g.beginPath();g.moveTo(x,top);g.lineTo(x,volBottom);g.stroke();g.setLineDash([]);
+      const x=center(selected);g.setLineDash([3,4]);g.strokeStyle='#506480';g.beginPath();g.moveTo(x,top);g.lineTo(x,volBottom);g.stroke();g.setLineDash([]);
     }
     text(infobar,selectedInfo(view[selected===null?view.length-1:selected]));
     drawResult={view,gutter,span};
-    requestAnimationFrame(()=>{scroller.scrollLeft=scroller.scrollWidth-scroller.clientWidth;});
+    requestAnimationFrame(()=>{scroller.scrollLeft=scrollRight?scroller.scrollWidth-scroller.clientWidth:oldScroll;});
   }
   canvas.addEventListener('pointerdown',e=>{
     if(!drawResult)return;
     const x=e.clientX-canvas.getBoundingClientRect().left;
     selected=Math.min(drawResult.view.length-1,Math.max(0,Math.floor((x-drawResult.gutter)/drawResult.span)));
-    paint();
+    paint(false);
   });
   // 숨겨진 상태에서 폭 측정을 피하고, 이후 화면 회전에도 다시 그린다.
   const resize=()=>{if(parent.isConnected&&parent.offsetParent!==null)paint();};
@@ -509,7 +607,54 @@ function buildChart(parent,rows,code){
     const observer=new ResizeObserver(()=>{if(parent.isConnected&&parent.offsetParent!==null)paint();else observer.disconnect();});
     observer.observe(scroller);
   }
-  paint();
+  // 확대 시 중앙의 원래 봉이 같은 위치에 남도록 가로 스크롤을 보정.
+  function zoomBy(factor, focalX){
+    const oldWidth=Math.max(1,canvas.clientWidth);
+    const centerX=Number.isFinite(focalX)?focalX:scroller.clientWidth/2;
+    const offset=(scroller.scrollLeft+centerX)/oldWidth;
+    const next=Math.max(.6,Math.min(5,zoomScale*factor));
+    if(Math.abs(next-zoomScale)<0.0001)return;
+    zoomScale=next;
+    paint(false);
+    requestAnimationFrame(()=>{scroller.scrollLeft=offset*canvas.clientWidth-centerX;});
+  }
+  zoomIn.addEventListener('click',()=>zoomBy(1.35));
+  zoomOut.addEventListener('click',()=>zoomBy(1/1.35));
+  zoomReset.addEventListener('click',()=>{zoomScale=1;paint(true);});
+  let touchStart=null,pinchDistance=null,pinchMid=null;
+  function distance(a,b){return Math.hypot(a.clientX-b.clientX,a.clientY-b.clientY);}
+  function centerClientX(a,b){return (a.clientX+b.clientX)/2-scroller.getBoundingClientRect().left;}
+  scroller.addEventListener('touchstart',event=>{
+    if(event.touches.length===2){
+      pinchDistance=distance(event.touches[0],event.touches[1]);
+      pinchMid=centerClientX(event.touches[0],event.touches[1]);touchStart=null;
+    }else if(event.touches.length===1){
+      pinchDistance=null;const t=event.touches[0];
+      touchStart={x:t.clientX,y:t.clientY,scroll:scroller.scrollLeft};
+    }
+  },{passive:true});
+  scroller.addEventListener('touchmove',event=>{
+    if(event.touches.length===2){
+      event.preventDefault();
+      const next=distance(event.touches[0],event.touches[1]);
+      if(pinchDistance>0){zoomBy(next/pinchDistance,centerClientX(event.touches[0],event.touches[1]));}
+      pinchDistance=next;return;
+    }
+    if(event.touches.length===1 && touchStart){
+      const t=event.touches[0],dx=t.clientX-touchStart.x,dy=t.clientY-touchStart.y;
+      if(Math.abs(dx)>8 && Math.abs(dx)>Math.abs(dy)*1.2){
+        event.preventDefault();scroller.scrollLeft=touchStart.scroll-dx;
+      }
+    }
+  },{passive:false});
+  scroller.addEventListener('touchend',event=>{
+    if(event.touches.length<2)pinchDistance=null;
+    if(event.touches.length===0)touchStart=null;
+  },{passive:true});
+  scroller.addEventListener('wheel',event=>{
+    if(event.ctrlKey){event.preventDefault();zoomBy(event.deltaY<0?1.14:1/1.14,event.clientX-scroller.getBoundingClientRect().left);}
+  },{passive:false});
+  paint(true);
 }
 
 function display(){
