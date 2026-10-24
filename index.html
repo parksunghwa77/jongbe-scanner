@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="theme-color" content="#f4f8ff">
-  <title>종베 스캐너 v6.8 · 일목 구름대와 일봉 차트</title>
+  <title>종베 스캐너 v7.0 · 구름대 돌파 자동검색·검증</title>
   <style>
     :root{color-scheme:light}*{box-sizing:border-box}
     body{margin:0;background:#101827;color:#f3f6fe;font-family:system-ui,-apple-system,"Noto Sans KR",sans-serif}
@@ -89,7 +89,7 @@
     .v6-inline{font-size:12px;color:#abc6ee}.v6-refresh{padding:10px 15px}
     @media(max-width:360px){.v6-stats{gap:4px}.v6-stat strong{font-size:17px}.v6-stat span{font-size:10px}}
 
-    /* v6.8: 밝은 확정 일봉 차트 + 일목균형표 구름대 */
+    /* v6.9: 기본 1개월 확대 일봉 + 가독성 개선 + 일목 구름대 */
     /* 차트는 각 종목 카드에서 항상 보인다. 화면 근처 진입 시 자동 로딩한다. */
     .chart-inline{margin-top:12px;border:1px solid #375477;border-radius:10px;background:#152238;overflow:hidden}
     .chart-inline-title{padding:12px;font-weight:750;color:#d4e7ff;border-bottom:1px solid #375477}
@@ -174,14 +174,43 @@
     .chart-zoom button.cloud-toggle{background:#d5f5e8;border-color:#76bca0;color:#076745}
     .chart-zoom button.cloud-toggle.off{background:#eef1f7;border-color:#c7d1df;color:#596a80}
     a{color:#2359b5}
+  
+    /* v7.0: scan and validate Ichimoku on published *confirmed* daily bars. */
+    .switcher{grid-template-columns:repeat(3,minmax(0,1fr));gap:6px}
+    .switcher button{padding:12px 3px;font-size:13px}
+    .v7-hero,.v7-panel{border:1px solid #c3d6ec;background:#fff;border-radius:14px;padding:15px;margin:13px 0;color:#253e5a}
+    .v7-hero{background:#eaf4ff}.v7-hero p{margin:7px 0}
+    .v7-heading{font-size:20px;font-weight:800;color:#204875}
+    .v7-alert{color:#944a18;background:#fff1d7;padding:10px;border-radius:9px}
+    .v7-disclaimer{font-size:12px;color:#61738a;line-height:1.75}
+    .v7-statgrid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:9px;margin:14px 0}
+    .v7-stat{background:#fff;border:1px solid #c7d9ee;border-radius:12px;padding:12px;text-align:center}
+    .v7-stat strong{display:block;font-size:24px;color:#11745a}
+    .v7-stat span{font-size:12px;color:#47617f}
+    .v7-filters{display:grid;grid-template-columns:1fr 1fr;gap:9px;background:#eaf3fd;border:1px solid #c7d9ee;border-radius:12px;padding:13px}
+    .v7-full{grid-column:1/-1}
+    .v7-stock{margin:12px 0;padding:15px;border-radius:13px;background:#fff;border:1px solid #d0dfed}
+    .v7-stock-head{display:flex;justify-content:space-between;gap:9px}
+    .v7-bigscore{font-size:24px;font-weight:900;white-space:nowrap;color:#147655}
+    .v7-badge{display:inline-block;font-size:11px;border-radius:6px;padding:4px 6px;margin:3px 3px;background:#e1f1ff}
+    .v7-badge.up{background:#d9f8e8;color:#166d4a}.v7-badge.fail{background:#ffe7de;color:#aa3d31}
+    .v7-details{display:grid;grid-template-columns:1fr 1fr;gap:7px 10px;margin:13px 0;font-size:12px;color:#3c5975}
+    .v7-failure{display:flex;gap:5px;flex-direction:column;background:#fff5ef;border:1px solid #f1d7c7;border-radius:9px;padding:10px;margin:8px 0;font-size:12px;color:#825139}
+    .v7-failure strong{color:#93402e}
+    .v7-panel{overflow-x:auto}
+    .v7-panel .history{min-width:520px}
+    .v7-statgrid>*{min-width:0}
+    @media(min-width:620px){.v7-statgrid{grid-template-columns:repeat(4,minmax(0,1fr))}.v7-filters{grid-template-columns:repeat(4,minmax(0,1fr))}}
+
   </style>
 </head>
 <body><main>
-  <h1 class="app-title">📈 종베 스캐너 <span>v6.8</span></h1>
+  <h1 class="app-title">📈 종베 스캐너 <span>v7.0</span></h1>
   <div class="status-pill">🔎 읽기 전용 · 투자 추천 아님</div>
   <nav class="switcher" aria-label="분석 화면 선택">
     <button id="tabv6" type="button" class="selected" aria-pressed="true">v6 장중 관찰</button>
     <button id="tabv5" type="button" aria-pressed="false">v5 일봉 전종목</button>
+    <button id="tabv7" type="button" aria-pressed="false">v7 ☁️ 구름 검색</button>
   </nav>
   <section id="v6panel" aria-label="v6 장중 관찰 화면">
     <div class="v6-hero">
@@ -209,6 +238,41 @@
     <section id="v6results" aria-label="장중 관찰 후보 검색 결과"><p class="v6-empty">검색 결과를 불러오는 중입니다.</p></section>
     <p class="v6-note">공개되는 정보는 종목코드·이름·산출 점수·위험 표시·조회 작업 시각만입니다. 나무증권 API 키·인증 토큰·장중 원시 시세는 웹에 게시하지 않습니다. 공개된 과거 확정 일봉의 시세·거래량·이평선은 개별 종목 차트에 표시됩니다. 점수는 상승 확률이나 실전 수익 검증이 아닙니다. <b>v6 결과는 오후 2시 30분 장중 작업 완료 후</b> 게시되며 휴일에는 새 결과를 만들지 않습니다. GitHub 저장소가 공개라 점수는 다른 사람도 볼 수 있습니다.</p>
   </section>
+
+  <section id="v7panel" aria-label="v7 일목 구름대 종가매매 분석" hidden>
+    <div class="v7-hero">
+      <div class="v7-heading">☁️ 구름대 돌파 · 종가매매 실험실 v7.0</div>
+      <p>확정 1일봉으로 <b>코스피·코스닥 분석 대상 종목의 상향 돌파</b>를 자동 검색하고, 구름 두께·거래량 증가·100점 조건·최근 실패·다음날 종가 변화까지 확인합니다.</p>
+      <small>당일 장중 실시간 검색이 아닙니다. 구름대는 9·26·52일 및 26거래일 선행 방식이고, 미래 주가 예측 지표가 아닙니다.</small>
+    </div>
+    <div class="bar"><button type="button" id="v7refresh">☁️ 전체 종목 다시 분석</button><small>탭을 처음 열면 자동 시작 · 확정 일봉 기준</small></div>
+    <div class="v6-meta" id="v7status" role="status" aria-live="polite">구름대 분석을 시작하려면 v7 탭을 열어주세요.</div>
+    <div class="v6-warn" id="v7warning">⚠️ 과거 분석 신호이며 매수·수익 보장이 아닙니다.</div>
+    <div class="v7-statgrid">
+      <div class="v7-stat"><strong id="v7total">–</strong><span>구름대 분석 종목</span></div>
+      <div class="v7-stat"><strong id="v7today">–</strong><span>오늘 돌파</span></div>
+      <div class="v7-stat"><strong id="v7recent">–</strong><span>최근 5일 돌파</span></div>
+      <div class="v7-stat"><strong id="v7failed">–</strong><span>최근 20일 돌파 후 실패</span></div>
+    </div>
+    <details class="v7-panel"><summary><b>🎯 종가매매 적합도 100점 기준 보기</b></summary>
+      <p>구름대 위 15점 + 최근 5거래일 상향 돌파 20점 + 5일선&gt;20일선 15점 + 거래량이 직전 20일 평균의 1.5배 이상 20점 + 당일 고저가 내 종가 위치 75% 이상 15점 + 직전 20거래일 고가 돌파 15점 = <b>최대 100점</b>.</p>
+      <p>구름 두께=(구름 상단−하단)/종가 ×100. 얇음 &lt;3%, 보통 3% 이상~8% 미만, 두꺼움 8% 이상. 임의 규칙이며 검증된 상승 확률을 뜻하지 않습니다.</p>
+    </details>
+    <section class="v7-panel" id="v7backtest"><h3>📊 과거 다음날 변화 검증</h3><p>분석 대기 중입니다.</p></section>
+    <section class="v7-panel" id="v7failurehistory"><h3>⚠️ 구름 돌파 후 실패 추적</h3><p>분석 대기 중입니다.</p></section>
+    <div class="v7-filters" aria-label="구름대 검색 필터">
+      <label class="v7-full">종목명·종목코드<input type="search" id="v7query" placeholder="예: 삼성전자, 005930"></label>
+      <label>돌파·실패 상태<select id="v7signal"><option value="today">오늘 상향 돌파</option><option value="recent">최근 5거래일 돌파</option><option value="failed">최근 20거래일 돌파 실패</option><option value="above">구름대 위</option><option value="thin">얇은 구름대</option><option value="all">전체 종목</option></select></label>
+      <label>최소 100점 점수<select id="v7min"><option value="0" selected>전체</option><option value="40">40점 이상</option><option value="60">60점 이상</option><option value="80">80점 이상</option></select></label>
+      <label>시장<select id="v7market"><option value="ALL">코스피+코스닥</option><option value="KOSPI">코스피</option><option value="KOSDAQ">코스닥</option></select></label>
+      <label>구름 두께<select id="v7thickness"><option value="all">전체</option><option value="얇음">얇음 (&lt;3%)</option><option value="보통">보통 (3~8%)</option><option value="두꺼움">두꺼움 (8% 이상)</option></select></label>
+      <label>정렬<select id="v7sort"><option value="score">적합도 점수순</option><option value="volume">거래량 증가율순</option><option value="thin">구름 두께 얇은순</option><option value="recent">최근 돌파 우선</option></select></label>
+    </div>
+    <div class="titlebar"><h2>☁️ 구름대 조건 검색</h2><small id="v7count">분석 대기 중</small></div>
+    <section id="v7results" aria-label="구름대 분석 대상 종목"><p class="v6-empty">확정 일봉 데이터를 분석 중입니다.</p></section>
+    <p class="v7-disclaimer">상향 돌파는 전 거래일 종가 ≤ 그날 구름 상단이고 당일 종가 &gt; 당일 구름 상단인 경우입니다. 사용한 선행 구름은 해당 거래일보다 26거래일 전에 계산된 값입니다. 거래량 증가율은 직전 20거래일 평균 대비이며, 5거래일 연속 확보되지 않은 종목은 추적 결과를 확정하지 않습니다. 장중 v6과 분석 시간·데이터가 다릅니다.</p>
+  </section>
+
   <section id="v5panel" aria-label="v5 전종목 일봉 검색" hidden>
     <h2>확정 일봉 전종목 · 정배열·골든크로스·추세 색상 검색</h2>
   <div class="badge">⚠️ 장 마감 후 확정 일봉 · 실시간 아님</div>
@@ -366,7 +430,7 @@ function companyNameButton(stock){
   return btn;
 }
 // 차트를 펼치지 않아도 자동 표시. 현재 보이는 카드부터 로딩하여 스마트폰 속도를 지킨다.
-const chartObservers={v5:[],v6:[]};
+const chartObservers={v5:[],v6:[],v7:[]};
 function clearChartObservers(group){
   for(const observer of chartObservers[group])observer.disconnect();
   chartObservers[group]=[];
@@ -472,21 +536,21 @@ function buildChart(parent,rows,code){
   }
   const scroller=elem('div','chart-scroll');
   const canvas=elem('canvas','chart-canvas');
-  canvas.height=330;canvas.setAttribute('role','img');canvas.setAttribute('aria-label',code+' 일봉 캔들, 일목 구름대, 5·20·200일 이동평균선과 거래량');
+  canvas.height=400;canvas.setAttribute('role','img');canvas.setAttribute('aria-label',code+' 일봉 캔들, 일목 구름대, 5·20·200일 이동평균선과 거래량');
   scroller.append(canvas);
   const infobar=elem('div','chart-detail');
-  const caption=elem('div','chart-caption',`📅 확정 일봉 기준일 ${infoDate} · 자료기간 ${rows[0][0]}~${rows[rows.length-1][0]} · 구름대는 9·26·52 거래일 고저가 중간값으로 계산해 26거래일 오른쪽에 그리며 오른쪽 끝은 미래 주가 예측이 아닙니다. 지지/저항은 이전 20거래일 고저가 참고선입니다. 신호는 미래 수익을 보장하지 않습니다. 손가락으로 확대·축소하거나 이동해 확인하세요.`);
+  const caption=elem('div','chart-caption',`📅 확정 일봉 기준일 ${infoDate} · 자료기간 ${rows[0][0]}~${rows[rows.length-1][0]} · 구름대는 9·26·52 거래일 고저가 중간값으로 계산해 26거래일 오른쪽에 그리며 오른쪽 끝은 미래 주가 예측이 아닙니다. 지지/저항은 이전 20거래일 고저가 참고선입니다. 신호는 미래 수익을 보장하지 않습니다. 기본은 최근 1개월 확대입니다. 멀리 떨어진 이평선·구름은 화면 밖에 있을 수 있으며, 손가락으로 확대·축소하거나 이동해 확인하세요.`);
 
 // v6.8: 확정 1일봉 차트 전용.
 const dailyBox=elem('div');
-const modeNote=elem('div','chart-mode-note','📆 1일봉 · 확정 일봉 / 실시간 시세 아님');
+const modeNote=elem('div','chart-mode-note','📆 1일봉 · 기본 1개월 확대 / 실시간 시세 아님');
 const cloudStatus=elem('div','chart-cloud-status');
 const zoomBar=elem('div','chart-zoom');
 const zoomOut=elem('button','','−');zoomOut.type='button';zoomOut.setAttribute('aria-label','차트 축소');
 const zoomIn=elem('button','','+');zoomIn.type='button';zoomIn.setAttribute('aria-label','차트 확대');
 const zoomReset=elem('button','','기본');zoomReset.type='button';
 const cloudBtn=elem('button','cloud-toggle','☁️ 구름대 켜짐');cloudBtn.type='button';cloudBtn.setAttribute('aria-pressed','true');
-const zoomHint=elem('small','','두 손가락 확대·축소 · 한 손가락 이동');
+const zoomHint=elem('small','','기본 1개월 확대 · 두 손가락 확대·축소 · 한 손가락 이동');
 zoomBar.append(zoomOut,zoomIn,zoomReset,cloudBtn,zoomHint);
 dailyBox.append(modeNote,controls,srInfo,legend,cloudStatus,zoomBar,scroller,infobar,caption);
 parent.append(dailyBox);
@@ -500,7 +564,7 @@ cloudBtn.addEventListener('click',()=>{
   paint(false);
 });
   let zoomScale=1;
-  let currentPeriod=63;
+  let currentPeriod=21;
   let selected=null;
   let drawResult=null;
   const periods=[['1개월',21],['3개월',63],['6개월',126],['1년',252]];
@@ -524,32 +588,36 @@ cloudBtn.addEventListener('click',()=>{
     const oldScroll=scroller.scrollLeft;
     const view=rows.slice(-currentPeriod);
     if(!view.length){text(infobar,'차트 자료 없음');return;}
-    const desired=currentPeriod<=21?13:(currentPeriod<=63?9:(currentPeriod<=126?7:5.5));
+    const desired=currentPeriod<=21?19:(currentPeriod<=63?12:(currentPeriod<=126?9:7));
     const gutter=58, right=15;
     const projectedBars=showCloud?ichimoku.forward:0;
     const totalBars=view.length+projectedBars;
     const width=Math.max(Math.floor(scroller.clientWidth)-2,Math.ceil(gutter+right+totalBars*desired*zoomScale));
-    const height=330;
+    const height=400;
     canvas.style.width=width+'px';canvas.style.height=height+'px';
     const ratio=Math.min(window.devicePixelRatio||1,2);
     canvas.width=Math.floor(width*ratio);canvas.height=Math.floor(height*ratio);
     const g=canvas.getContext('2d');g.setTransform(ratio,0,0,ratio,0,0);
-    const top=24, bottom=239, volTop=266, volBottom=309;
+    const top=23, bottom=306, volTop=333, volBottom=381;
     const span=(width-gutter-right)/totalBars;
     const viewStart=rows.length-view.length;
-    const values=[];
-    for(const r of view){values.push(r[2],r[3]);for(const k of [6,7,8])if(Number.isFinite(r[k]))values.push(r[k]);}
-    // 일목 구름대의 모든 그려지는 영역과 전환선·기준선을 가격축 범위에 포함한다.
+    // v6.9: 화면에 보이는 캔들 중심으로 가격축을 잡는다.
+    // 먼 과거의 200일선이나 26일 뒤 구름대가 과도하게 가격축을 확장해
+    // 오늘 캔들을 납작하게 만들지 않도록, 가까운 보조 지표만 축에 반영한다.
+    const candleLow=Math.min(...view.map(r=>r[3]));
+    const candleHigh=Math.max(...view.map(r=>r[2]));
+    const priceMid=(candleLow+candleHigh)/2;
+    const proximity=Math.max((candleHigh-candleLow)*1.5,priceMid*.12,1);
+    const values=[candleLow,candleHigh];
+    const addNearby=v=>{if(Number.isFinite(v)&&Math.abs(v-priceMid)<=proximity)values.push(v);};
+    for(const r of view)for(const k of [6,7,8])addNearby(r[k]);
     if(showCloud){
       for(let p=viewStart;p<rows.length+ichimoku.forward;p++){
-        for(const v of [ichimoku.spanA[p],ichimoku.spanB[p]])if(Number.isFinite(v))values.push(v);
-        if(p<rows.length){
-          for(const v of [ichimoku.tenkan[p],ichimoku.kijun[p]])if(Number.isFinite(v))values.push(v);
-        }
+        addNearby(ichimoku.spanA[p]);addNearby(ichimoku.spanB[p]);
+        if(p<rows.length){addNearby(ichimoku.tenkan[p]);addNearby(ichimoku.kijun[p]);}
       }
     }
-    // 최신 20거래일 저항·지지선도 표시 범위에 포함된다.
-    if(latestLevel)values.push(latestLevel.resistance,latestLevel.support);
+    if(latestLevel){addNearby(latestLevel.resistance);addNearby(latestLevel.support);}
     let min=Math.min(...values),max=Math.max(...values),pad=Math.max((max-min)*0.08,max*0.004,1);
     min=Math.max(0,min-pad);max+=pad;
     const mapY=x=>bottom-((x-min)/(max-min))*(bottom-top);
@@ -627,7 +695,7 @@ if(showCloud){
         const markers=[[1,'G',chartColors.golden],[2,'D',chartColors.dead],[4,'20','#ffda8e'],[8,'200','#d3baff']];
         let idx=0;
         for(const [mask,label,col] of markers){if(!(r[9]&mask))continue;
-          const y=mask===2?Math.max(11,mapY(r[2])-13-idx*13):Math.min(259,mapY(r[3])+12+idx*13);
+          const y=mask===2?Math.max(11,mapY(r[2])-13-idx*13):Math.min(327,mapY(r[3])+12+idx*13);
           g.fillStyle=col;g.textAlign='center';g.font='bold 9px system-ui';g.fillText(label,x,y);idx++;
         }
       }
@@ -654,7 +722,7 @@ if(showCloud){
 }
     g.font='10px system-ui';g.fillStyle=chartColors.text;g.textAlign='center';
     const step=Math.max(1,Math.ceil(view.length/5));
-    for(let i=0;i<view.length;i+=step)g.fillText(view[i][0].slice(5),center(i),324);
+    for(let i=0;i<view.length;i+=step)g.fillText(view[i][0].slice(5),center(i),397);
     if(selected!==null&&selected>=0&&selected<view.length){
       const x=center(selected);g.setLineDash([3,4]);g.strokeStyle='#506480';g.beginPath();g.moveTo(x,top);g.lineTo(x,volBottom);g.stroke();g.setLineDash([]);
     }
@@ -663,7 +731,15 @@ if(showCloud){
     text(cloudStatus,showCloud?`${cloudToday} · 구름 끝의 26봉은 앞당겨 그린 지표이며 미래 주가 예측이 아닙니다.`:
       '☁️ 구름대 숨김 · 버튼을 누르면 전환선·기준선과 함께 표시됩니다.');
     drawResult={view,gutter,span};
-    requestAnimationFrame(()=>{scroller.scrollLeft=scrollRight?scroller.scrollWidth-scroller.clientWidth:oldScroll;});
+    // 처음 진입하거나 기간을 바꿀 때는 최신 봉을 화면의 약 72% 위치에 둔다.
+    // 기존 방식(맨 오른쪽 스크롤)은 26봉 선행 구름 영역만 보여
+    // 실제 캔들이 화면 왼쪽으로 사라지는 문제가 있었다.
+    requestAnimationFrame(()=>{
+      const latestCandleX=center(view.length-1);
+      const latestFocusedScroll=Math.max(0,latestCandleX-scroller.clientWidth*.72);
+      const maxScroll=Math.max(0,scroller.scrollWidth-scroller.clientWidth);
+      scroller.scrollLeft=Math.min(maxScroll,scrollRight?latestFocusedScroll:oldScroll);
+    });
   }
   canvas.addEventListener('pointerdown',e=>{
     if(!drawResult)return;
@@ -810,7 +886,7 @@ async function load(){
     if(!r.ok)throw Error('results.json HTTP '+r.status);
     const d=await r.json();
     if(!Array.isArray(d.rows))throw Error('데이터 형식이 올바르지 않습니다.');
-    dataRows=d.rows;infoDate=d.asof||'-';clearChartCacheIfDateChanged();countShown=20;displayBacktest(d.backtest);v6Render();
+    dataRows=d.rows;infoDate=d.asof||'-';v7ExpectedAsOf=d.expected_asof||'-';clearChartCacheIfDateChanged();countShown=20;displayBacktest(d.backtest);v6Render();if(v7AnalysisDate!==infoDate)v7Clear();
     const expected=d.expected_asof||'-';
     const lag=Number(d.lag_sessions||0);
     const stale=d.data_status==='delayed' || (expected!=='-' && infoDate<expected);
@@ -824,7 +900,7 @@ async function load(){
     const note=(d.minor_version==='5.0'?'':' ⚠️ v5 데이터가 아닙니다. 자동 분석을 다시 실행하세요.')+(signalsReady?'':' ⚠️ 정배열·골든크로스 데이터가 아직 없습니다. 새 scanner.py로 분석을 다시 실행해 주세요.')+(trendReady?'':' ⚠️ 추세 색상은 아직 계산되지 않았습니다. v6.6 scanner.py로 분석을 다시 실행해 주세요.')+(chartReady?'':' ⚠️ 일봉 차트 데이터가 아직 게시되지 않았습니다. v6.5 scanner.yml까지 설치하고 분석을 다시 실행해 주세요.');
     text($('status'),`데이터 기준일 ${infoDate} · 기대 거래일 ${expected} · 갱신 작업 ${d.updated||'-'} · 전체 ${fmt(d.universe_size||0)}종목 / 분석 유효 ${fmt(d.analyzed_count||0)}종목${note}`);
   }catch(e){displayBacktest(null);dataRows=[];$('freshness').hidden=false;text($('freshness'),'⚠️ 분석 결과를 읽지 못했습니다. GitHub Actions 실행 상태를 확인하세요.');text($('status'),'⚠️ 분석 데이터를 읽지 못했습니다: '+e.message);}
-  finally{$('refresh').disabled=false;display();}
+  finally{$('refresh').disabled=false;display();if($('tabv7').classList.contains('selected'))v7Load();}
 }
 ['query','viewmode','market','mafilter','trendfilter','minscore','minvalue','change','sort','position'].forEach(id=>
   $(id).addEventListener(id==='query'?'input':'change',()=>{countShown=20;display();}));
@@ -900,16 +976,318 @@ async function v6Load(){
     document.getElementById('v6fresh').textContent='⚠️ v6.1은 동작하지만 장중 점수를 웹에 공개하려면 제공된 v6.2 워크플로를 설치하고 실제 거래일 장중에 성공 실행해야 합니다. 기존 v5 데이터는 오른쪽 탭에서 확인할 수 있습니다.';
   }finally{btn.disabled=false;v6Render();}
 }
-function v6Switch(kind){
-  const is6=kind==='v6';document.getElementById('v6panel').hidden=!is6;document.getElementById('v5panel').hidden=is6;
-  for(const [id,state] of [['tabv6',is6],['tabv5',!is6]]){let e=document.getElementById(id);e.classList.toggle('selected',state);e.setAttribute('aria-pressed',String(state));}
-  try{history.replaceState(null,'','#'+kind);}catch{}
+// v7.0 cloud lab: confirmed public OHLCV only; no API keys, no intraday prices.
+// Historical return is close(t+1)/close(t)-1, not an executable trading return.
+let v7Results=[],v7Failures=[],v7Backtest=[],v7AnalysisDate='',v7Running=false;
+const V7_SCAN_DAYS=120,V7_FAILED_WINDOW=20;
+const v7Round=(x,d=1)=>Number.isFinite(x)?Number(x.toFixed(d)):null;
+const v7Pct=x=>x===null||x===undefined?'자료 부족':`${x>0?'+':''}${Number(x).toFixed(1)}%`;
+const v7CloudFmt=x=>x===null||x===undefined?'계산 불가':`${fmt(Math.round(x))}원`;
+function v7Clear(){v7Results=[];v7Failures=[];v7Backtest=[];v7AnalysisDate='';}
+function v7Compute(code,base,rows,marketCalendar){
+  if(!Array.isArray(rows)||rows.length<80)return null;
+  const len=rows.length;
+  const run=Array(len).fill(1);
+  for(let i=1;i<len;i++){
+    const a=marketCalendar.get(rows[i-1][0]),b=marketCalendar.get(rows[i][0]);
+    run[i]=(a!==undefined&&b===a+1)?run[i-1]+1:1;
+  }
+  const n9=Array(len).fill(null),n26=Array(len).fill(null),n52=Array(len).fill(null);
+  const midpoint=(i,n)=>{
+    if(i<n-1)return null;
+    let hi=-Infinity,lo=Infinity;
+    for(let j=i-n+1;j<=i;j++){
+      const r=rows[j];
+      if(!Array.isArray(r)||!Number.isFinite(r[2])||!Number.isFinite(r[3])||r[2]<r[3])return null;
+      hi=Math.max(hi,r[2]);lo=Math.min(lo,r[3]);
+    }
+    return (hi+lo)/2;
+  };
+  for(let i=0;i<len;i++){
+    if(run[i]>=9)n9[i]=midpoint(i,9);
+    if(run[i]>=26)n26[i]=midpoint(i,26);
+    if(run[i]>=52)n52[i]=midpoint(i,52);
+  }
+  const upper=Array(len).fill(null),lower=Array(len).fill(null);
+  for(let i=77;i<len;i++){
+    // Projected at i, calculated strictly from i-26 and earlier.
+    if(run[i]<78)continue;
+    const old=i-26;
+    if([n9[old],n26[old],n52[old]].some(v=>v===null))continue;
+    const a=(n9[old]+n26[old])/2,b=n52[old];
+    upper[i]=Math.max(a,b);lower[i]=Math.min(a,b);
+  }
+  const events=[];
+  for(let i=1;i<len;i++){
+    if(upper[i]===null||upper[i-1]===null||run[i]<79)continue;
+    if(rows[i-1][4]<=upper[i-1]&&rows[i][4]>upper[i])events.push(i);
+  }
+  const eventSet=new Set(events);
+  function scoreAt(i){
+    if(i<79||upper[i]===null||run[i]<79)return null;
+    const bar=rows[i],close=bar[4];
+    const avg=rows.slice(i-20,i).reduce((sum,r)=>sum+r[5],0)/20;
+    const ratio=avg>0?bar[5]/avg:null;
+    const location=bar[2]>bar[3]?(close-bar[3])/(bar[2]-bar[3]):null;
+    const maAbove=Number.isFinite(bar[6])&&Number.isFinite(bar[7])&&bar[6]>bar[7];
+    const high=Math.max(...rows.slice(i-20,i).map(r=>r[2]));
+    // 5 trading sessions including today. All tests use information available at i.
+    const recent=events.some(e=>e<=i&&e>=i-4);
+    const points=(close>upper[i]?15:0)+(recent?20:0)+(maAbove?15:0)+
+      (ratio!==null&&ratio>=1.5?20:0)+(location!==null&&location>=0.75?15:0)+
+      (close>high?15:0);
+    return {points,ratio,location,recent,cloudAbove:close>upper[i],maAbove,resistanceBreak:close>high};
+  }
+  const latest=scoreAt(len-1);
+  if(!latest)return null;
+  const close=rows[len-1][4];
+  const upperNow=upper[len-1],lowerNow=lower[len-1];
+  const thickness=100*(upperNow-lowerNow)/close;
+  const density=thickness<3?'얇음':thickness<8?'보통':'두꺼움';
+  const lastEvent=events.length?events[events.length-1]:null;
+  let breakoutState='없음',lastFailedDate=null,lastEventDate=null;
+  if(lastEvent!==null){
+    lastEventDate=rows[lastEvent][0];
+    const ending=Math.min(len-1,lastEvent+5);
+    const drop=[];
+    for(let k=lastEvent+1;k<=ending;k++){
+      if(run[k]!==run[k-1]+1)break;
+      if(upper[k]!==null&&rows[k][4]<=upper[k])drop.push(k);
+    }
+    if(drop.length){breakoutState='실패';lastFailedDate=rows[drop[0]][0];}
+    else if(len-1-lastEvent>=5 && run[lastEvent+5]===run[lastEvent]+5)breakoutState='5일 유지';
+    else breakoutState='관찰 중';
+  }
+  const lastCal=marketCalendar.get(rows[len-1][0]);
+  const evtCal=lastEvent!==null?marketCalendar.get(rows[lastEvent][0]):undefined;
+  const sessionsSince=lastCal!==undefined&&evtCal!==undefined?lastCal-evtCal:null;
+  // Calculate next-day results strictly after detecting each historical breakout.
+  const testEvents=[];
+  for(const e of events){
+    const eventCal=marketCalendar.get(rows[e][0]);
+    if(eventCal===undefined||lastCal===undefined||lastCal-eventCal>V7_SCAN_DAYS)continue;
+    const sc=scoreAt(e);
+    if(!sc)continue;
+    const hasNext=e+1<len&&run[e+1]===run[e]+1;
+    const nextPct=hasNext?(rows[e+1][4]/rows[e][4]-1)*100:null;
+    const has5=e+5<len&&run[e+5]===run[e]+5;
+    let failed5=null,failureDate=null;
+    if(has5){
+      let failure=null;
+      for(let k=e+1;k<=e+5;k++){
+        if(upper[k]!==null&&rows[k][4]<=upper[k]){failure=k;break;}
+      }
+      failed5=failure!==null;
+      if(failure!==null)failureDate=rows[failure][0];
+    }else{
+      for(let k=e+1;k<Math.min(len,e+6);k++){
+        if(run[k]!==run[k-1]+1)break;
+        if(upper[k]!==null&&rows[k][4]<=upper[k]){failureDate=rows[k][0];break;}
+      }
+    }
+    const recent20=(lastCal-eventCal)<=V7_FAILED_WINDOW;
+    testEvents.push({code,name:base.name,market:base.market,date:rows[e][0],score:sc.points,
+      next_pct:nextPct,failed_5d:failed5,failed_date:failureDate,
+      recent_20d:recent20});
+  }
+  const entry={code,name:base.name,market:base.market,score:latest.points,
+    close,cloud_upper:v7Round(upperNow,2),cloud_lower:v7Round(lowerNow,2),
+    cloud_thickness_pct:v7Round(thickness,2),cloud_thickness_label:density,
+    volume_increase_pct:latest.ratio===null?null:v7Round((latest.ratio-1)*100,1),
+    volume_ratio:latest.ratio===null?null:v7Round(latest.ratio,2),
+    recent_breakout:latest.recent,breakout_today:eventSet.has(len-1),
+    above_cloud:latest.cloudAbove,above_ma:latest.maAbove,high20_breakout:latest.resistanceBreak,
+    position:latest.location===null?null:v7Round(latest.location*100,1),
+    last_breakout_date:lastEventDate,last_breakout_sessions_ago:sessionsSince,
+    breakout_state:sessionsSince!==null&&sessionsSince<=V7_FAILED_WINDOW?breakoutState:'없음',
+    failed_date:sessionsSince!==null&&sessionsSince<=V7_FAILED_WINDOW?lastFailedDate:null};
+  return {entry,events:testEvents};
 }
-document.getElementById('tabv6').addEventListener('click',()=>v6Switch('v6'));
-document.getElementById('tabv5').addEventListener('click',()=>v6Switch('v5'));
-['v6query','v6min','v6risk'].forEach(id=>document.getElementById(id).addEventListener(id==='v6query'?'input':'change',v6Render));
-document.getElementById('v6refresh').addEventListener('click',v6Load);
-v6Switch(location.hash==='#v5'?'v5':'v6');
+function v7Summarize(events){
+  const summarize=(all)=>{
+    const next=all.filter(e=>e.next_pct!==null);
+    const five=all.filter(e=>e.failed_5d!==null);
+    const mean=next.length?next.reduce((s,e)=>s+e.next_pct,0)/next.length:null;
+    return {signals:all.length,observed:next.length,pending_next:all.length-next.length,
+      average_next_pct:mean===null?null:v7Round(mean,2),
+      win_rate_pct:next.length?v7Round(100*next.filter(e=>e.next_pct>0).length/next.length,1):null,
+      five_day_observed:five.length,five_day_fail_rate_pct:five.length?v7Round(100*five.filter(e=>e.failed_5d).length/five.length,1):null};
+  };
+  return {all:summarize(events),score60:summarize(events.filter(e=>e.score>=60)),
+    score80:summarize(events.filter(e=>e.score>=80)),
+    failure_examples:events.filter(e=>e.recent_20d&&e.failed_date).sort((a,b)=>b.failed_date.localeCompare(a.failed_date)).slice(0,30)};
+}
+function v7Stats(){
+  const total=v7Results.length,today=v7Results.filter(x=>x.breakout_today).length,
+    recent=v7Results.filter(x=>x.recent_breakout).length,
+    failed=v7Results.filter(x=>x.breakout_state==='실패').length;
+  for(const [id,val] of [['v7total',total],['v7today',today],['v7recent',recent],['v7failed',failed]])$(id).textContent=fmt(val);
+}
+function v7RenderTest(){
+  const box=$('v7backtest');box.replaceChildren();
+  const top=elem('div');
+  const stats=v7Summarize(v7Backtest);
+  box.append(elem('h3','','📊 과거 120거래일 돌파 후 다음 날 종가 변화'));
+  const table=elem('table','history');
+  const header=elem('tr');['대상','돌파','다음날 확인','종가 평균 변화','상승 비율','5일 내 구름 복귀'].forEach(s=>header.append(elem('th','',s)));
+  const thead=elem('thead');thead.append(header);table.append(thead);
+  const tbody=elem('tbody');
+  for(const [label,s] of [['전체 상향 돌파',stats.all],['종가매매 60점 이상',stats.score60],['종가매매 80점 이상',stats.score80]]){
+    const row=elem('tr');
+    [label,fmt(s.signals),`${fmt(s.observed)}건`,v7Pct(s.average_next_pct),s.win_rate_pct===null?'자료 부족':s.win_rate_pct+'%',s.five_day_fail_rate_pct===null?'미확인':`${s.five_day_fail_rate_pct}% (${s.five_day_observed}건)`]
+      .forEach(s=>row.append(elem('td','',s)));
+    tbody.append(row);
+  }
+  table.append(tbody);box.append(table);
+  if(stats.all.observed<30)box.append(elem('p','v7-alert','⚠️ 관측 표본이 30건 미만입니다. 평균치와 상승 비율을 일반화하지 마세요.'));
+  box.append(elem('p','v7-disclaimer','주의: 과거 확정 종가만 비교한 사후 검증입니다. 오늘 분석 가능한 종목만 과거에도 포함하는 생존·선택 편향이 있고, 상장폐지·분할·거래정지·수수료·슬리피지·매수 가능 가격 등을 완전히 반영하지 않습니다. 여러 종목/날짜를 독립 표본처럼 계산한 단순 평균이며, 전략 실현 수익·미래 상승 확률이 아닙니다. 5일 실패는 돌파 이후 5거래일 내 종가가 구름 상단 이하로 되돌아온 경우입니다. 5일 미경과 신호는 실패율 분모에서 제외합니다.'));
+  const history=$('v7failurehistory');history.replaceChildren();
+  history.append(elem('h3','','⚠️ 최근 20거래일 돌파 실패 추적'));
+  if(!stats.failure_examples.length){history.append(elem('p','','최근 20거래일 내 구름대 상향 돌파 후 실패가 확인된 사례가 없습니다. 또는 확인할 충분한 거래일 데이터가 없습니다.'));return;}
+  for(const e of stats.failure_examples.slice(0,12)){
+    const card=elem('div','v7-failure');
+    card.append(elem('strong','',`${e.name} (${e.code})`));
+    card.append(elem('span','',`돌파 ${e.date} → 구름 복귀 ${e.failed_date} · 돌파 당시 ${e.score}점 · 다음날 ${v7Pct(e.next_pct)}`));
+    history.append(card);
+  }
+}
+function v7Render(){
+  const q=v6N($('v7query').value),state=$('v7signal').value;
+  const market=$('v7market').value,thick=$('v7thickness').value,min=Number($('v7min').value);
+  const sorter=$('v7sort').value;
+  const list=v7Results.filter(x=>{
+    if(q && !v6N(x.name).includes(q) && !v6N(x.code).includes(q))return false;
+    if(market!=='ALL'&&x.market!==market)return false;
+    if(thick!=='all'&&x.cloud_thickness_label!==thick)return false;
+    if(x.score<min)return false;
+    if(state==='today'&&!x.breakout_today)return false;
+    if(state==='recent'&&!x.recent_breakout)return false;
+    if(state==='failed'&&x.breakout_state!=='실패')return false;
+    if(state==='above'&&!x.above_cloud)return false;
+    if(state==='thin'&&x.cloud_thickness_label!=='얇음')return false;
+    return true;
+  });
+  list.sort((a,b)=>sorter==='volume'?(b.volume_increase_pct??-1e10)-(a.volume_increase_pct??-1e10)||b.score-a.score:
+    sorter==='thin'?a.cloud_thickness_pct-b.cloud_thickness_pct||b.score-a.score:
+    sorter==='recent'?(Number(b.breakout_today)-Number(a.breakout_today))||Number(b.recent_breakout)-Number(a.recent_breakout)||b.score-a.score:
+    b.score-a.score||(b.volume_increase_pct??-1e10)-(a.volume_increase_pct??-1e10));
+  $('v7count').textContent=`${fmt(list.length)}종목 · 최대 30개 표시`;
+  const out=$('v7results');clearChartObservers('v7');out.replaceChildren();
+  if(!list.length){out.append(elem('p','v6-empty',v7Results.length?'조건을 만족하는 종목이 없습니다. 조건을 완화해 보세요.':'분석 결과가 아직 없습니다.'));return;}
+  const frag=document.createDocumentFragment();
+  for(const x of list.slice(0,30)){
+    const card=elem('article','v7-stock');
+    const heading=elem('div','v7-stock-head');
+    const left=elem('div');const companyBtn=companyNameButton(x);left.append(companyBtn,elem('span','pill',x.market==='KOSPI'?'코스피':'코스닥'));
+    if(x.breakout_today)left.append(elem('span','v7-badge up','☁️ 오늘 구름 돌파'));
+    else if(x.recent_breakout)left.append(elem('span','v7-badge up','☁️ 최근 5일 돌파'));
+    if(x.breakout_state==='실패')left.append(elem('span','v7-badge fail','⚠️ 돌파 실패'));
+    heading.append(left,elem('div','v7-bigscore',`${x.score}점`));card.append(heading);
+    const values=elem('div','v7-details');
+    [ `확정 종가 ${fmt(x.close)}원`,`구름 상단 ${v7CloudFmt(x.cloud_upper)}`,
+      `구름 하단 ${v7CloudFmt(x.cloud_lower)}`,
+      `☁️ 구름 두께 ${x.cloud_thickness_pct}% (${x.cloud_thickness_label})`,
+      `📊 거래량 증가율 ${v7Pct(x.volume_increase_pct)} (전20일 대비)`,
+      `종가 고가 위치 ${x.position===null?'자료 부족':x.position+'%'}`,
+      `5일선 > 20일선 ${x.above_ma?'예':'아니요'}`,
+      `최근 20일 고가 돌파 ${x.high20_breakout?'예':'아니요'}`,
+      `구름대 위 ${x.above_cloud?'예':'아니요'}`,
+      `최근 돌파 ${x.last_breakout_date||'기록 없음'}`,
+      `5일 결과 ${x.breakout_state==='없음'?'추적 대상 없음':x.breakout_state}`,
+      x.failed_date?`구름 복귀 ${x.failed_date}`:'기준일 '+v7AnalysisDate]
+      .forEach(s=>values.append(elem('span','',s)));
+    card.append(values);
+    const companyPanel=addCompanyPanel(card,x);
+    const chart=addChartInline(card,x.code,'v7');
+    companyBtn.addEventListener('click',()=>{companyPanel.open=!companyPanel.open;});
+    frag.append(card);
+  }
+  out.append(frag);
+}
+async function v7Load(){
+  if(v7Running)return;
+  if(!dataRows.length){$('v7status').textContent='v5 분석 데이터를 먼저 불러와야 합니다. v5 새로고침 후 다시 시도하세요.';return;}
+  if(v7AnalysisDate===infoDate&&v7Results.length){v7Render();return;}
+  v7Running=true;$('v7refresh').disabled=true;
+  v7Clear();
+  const status=$('v7status');
+  const lookup=new Map(dataRows.map(x=>[String(x.code),x]));
+  const prefixes=[...new Set(dataRows.map(x=>String(x.code).slice(0,2)))].sort();
+  let completed=0,skipped=0;
+  const recordError=[];
+  try{
+    if(!prefixes.length)throw Error('분석 가능한 종목이 없습니다.');
+    status.textContent='시장 거래일 달력과 확정 일봉 확인 중…';
+    async function getBundle(prefix){
+      const res=await fetch(`./charts/${prefix}.json?asof=${encodeURIComponent(infoDate)}`,{cache:'no-store'});
+      if(!res.ok)throw Error(`${prefix}.json HTTP ${res.status}`);
+      const data=await res.json();
+      if(data.schema!=='jongbe-ohlcv-v1'||data.asof!==infoDate||!data.stocks)throw Error('차트 기준일 불일치 또는 데이터 구조 오류');
+      return data;
+    }
+    const initial=await getBundle(prefixes[0]);
+    const sample=initial.stocks['005930']||Object.values(initial.stocks).filter(Array.isArray).sort((a,b)=>b.length-a.length)[0];
+    if(!Array.isArray(sample)||sample.length<150)throw Error('거래일 달력 자료가 부족합니다.');
+    const marketCalendar=new Map(sample.map((r,i)=>[r[0],i]));
+    const eventCollector=[];
+    let processed=0;
+    async function process(prefix,bundle){
+      for(const [code,series] of Object.entries(bundle.stocks)){
+        const known=lookup.get(code);
+        if(!known)continue;
+        if(!Array.isArray(series)||series.at(-1)?.[0]!==infoDate){skipped++;continue;}
+        const output=v7Compute(code,known,series,marketCalendar);
+        if(!output){skipped++;continue;}
+        v7Results.push(output.entry);eventCollector.push(...output.events);processed++;
+      }
+    }
+    await process(prefixes[0],initial);completed++;
+    const pending=prefixes.slice(1);
+    const worker=async()=>{
+      while(pending.length){
+        const prefix=pending.shift();
+        try{await process(prefix,await getBundle(prefix));}
+        catch(e){recordError.push(`${prefix}: ${e.message}`);}
+        completed++;
+        if(completed%3===0||completed===prefixes.length){
+          status.textContent=`☁️ 구름대 계산 중 ${completed}/${prefixes.length}묶음 · ${fmt(processed)}종목`;}
+        // Yield for scroll responsiveness on mobile.
+        await new Promise(resolve=>setTimeout(resolve,0));
+      }
+    };
+    await Promise.all(Array.from({length:Math.min(4,pending.length)},()=>worker()));
+    if(!v7Results.length)throw Error('유효한 구름대 분석 종목이 없습니다.');
+    v7Backtest=eventCollector;v7Failures=v7Summarize(eventCollector).failure_examples;
+    v7AnalysisDate=infoDate;
+    const expected=(typeof v7ExpectedAsOf==='string'?v7ExpectedAsOf:'-');
+    const stale=expected!=='-'&&infoDate<expected;
+    status.textContent=`✅ 확정 일봉 ${infoDate} 기준 · 구름대 분석 ${fmt(v7Results.length)}종목 / 원본 ${fmt(dataRows.length)}종목 · ${fmt(prefixes.length-recordError.length)}/${fmt(prefixes.length)}파일 성공 · 부적격 ${fmt(skipped)}종목${stale?' · ⚠️ 원본 지연':''}`;
+    const warn=$('v7warning');
+    warn.textContent=stale?`⚠️ 원본 확정 일봉이 기대 거래일 ${expected}보다 오래됐습니다. ${infoDate} 기준 과거 분석으로, 오늘 종가매매 판단에는 사용하지 마세요.`:
+      '⚠️ 마감된 확정 일봉 데이터만 사용합니다. 장중 종목 자동 검색·실시간 시세가 아닙니다.';
+    if(recordError.length){warn.textContent+=` 일부 구간 자료를 못 받았습니다 (${recordError.length}파일). 이때 검색·통계는 전체 시장이 아닌 부분 표본입니다.`;}
+    v7Stats();v7RenderTest();v7Render();
+  }catch(e){status.textContent='⚠️ 구름대 전체 분석 실패: '+e.message;}
+  finally{v7Running=false;$('v7refresh').disabled=false;}
+}
+let v7ExpectedAsOf='-';
+
+function v6Switch(kind){
+  for(const t of ['v5','v6','v7']){
+    const selected=t===kind;
+    $(''+t+'panel').hidden=!selected;
+    const b=$('tab'+t);b.classList.toggle('selected',selected);b.setAttribute('aria-pressed',String(selected));
+  }
+  try{history.replaceState(null,'','#'+kind);}catch{}
+  if(kind==='v7')v7Load();
+}
+['v5','v6','v7'].forEach(t=>$('tab'+t).addEventListener('click',()=>v6Switch(t)));
+['v6query','v6min','v6risk'].forEach(id=>$(id).addEventListener(id==='v6query'?'input':'change',v6Render));
+['v7query','v7signal','v7min','v7market','v7thickness','v7sort'].forEach(id=>
+  $(id).addEventListener(id==='v7query'?'input':'change',v7Render));
+$('v6refresh').addEventListener('click',v6Load);
+$('v7refresh').addEventListener('click',()=>{v7Clear();v7Load();});
+v6Switch(['#v5','#v6','#v7'].includes(location.hash)?location.hash.slice(1):'v6');
 v6Load();
 
 </script>
