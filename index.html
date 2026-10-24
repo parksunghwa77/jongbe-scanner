@@ -1,1 +1,82 @@
-<!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>종베 스캐너</title><style>body{margin:0;background:#101827;color:#f3f6fc;font-family:system-ui,sans-serif}main{max-width:720px;margin:auto;padding:22px}h1{font-size:26px}p{color:#b9c7db;line-height:1.6}.badge{background:#3b2b13;color:#ffd995;border-radius:8px;padding:10px;display:inline-block}.card{background:#1b2940;border:1px solid #30425c;border-radius:15px;padding:16px;margin:14px 0}.row{display:flex;justify-content:space-between;gap:12px;align-items:center}.score{font-size:24px;color:#7ce5b7;font-weight:bold}small{color:#b9c7db}button{background:#5f8ef9;color:white;border:0;border-radius:10px;padding:12px 20px;font-size:16px}#status{margin-top:12px}</style></head><body><main><h1>📈 종베 스캐너</h1><div class="badge">⚠️ 일별 확정 시세 · 실시간 아님</div><p>무료 데이터 기반 시험판입니다. 평일 16:30(KST) 이후 예약 분석을 시도하며 지연되거나 실패할 수 있습니다. 장 마감 전 매수 판단에 사용하지 마세요.</p><button id="refresh">결과 새로고침</button><p id="status" aria-live="polite">불러오는 중...</p><section id="results"></section><p><small>15개 시범 종목만 검색합니다. 점수는 단순 조건 충족도이며 상승 확률이 아닙니다. 거래대금은 종가×거래량 근사치입니다. 목표 +3%, 손절 -2%는 교육용 예시입니다.</small></p></main><script>const out=document.getElementById('results'),status=document.getElementById('status');const won=n=>Number(n).toLocaleString('ko-KR')+'원';async function load(){status.textContent='불러오는 중...';try{const r=await fetch('./results.json?t='+Date.now(),{cache:'no-store'});if(!r.ok)throw Error('결과 파일이 아직 없거나 배포되지 않았습니다 ('+r.status+')');const d=await r.json();status.textContent=`기준일: ${d.asof||'없음'} · 갱신: ${d.updated||'대기 중'} · 분석 ${d.rows?.length||0}종목`;out.replaceChildren();if(!d.rows?.length){out.textContent='분석 결과가 없습니다. GitHub Actions 실행 기록을 확인하세요.';return}for(const x of d.rows){const c=document.createElement('article');c.className='card';const h=document.createElement('div');h.className='row';const name=document.createElement('strong');name.textContent=x.name+' ('+x.code+')';const score=document.createElement('span');score.className='score';score.textContent=x.score+'점';h.append(name,score);const p=document.createElement('p');p.textContent=`종가 ${won(x.price)} · 등락 ${x.change}% · 거래대금(근사) ${x.value_eok}억원`;const s=document.createElement('small');s.textContent=`종가 위치 ${x.close_position}% · 거래량 배수 ${x.volume_ratio} · 예시 목표 ${won(x.target)} / 손절 ${won(x.stop)}`;c.append(h,p,s);out.append(c)}}catch(e){status.textContent='데이터를 불러오지 못했습니다: '+e.message}}document.getElementById('refresh').addEventListener('click',load);load()</script></body></html>
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#101827">
+  <title>종베 스캐너 v3</title>
+  <style>
+    :root {color-scheme:dark} * {box-sizing:border-box}
+    body {margin:0;background:#101827;color:#f2f6ff;font-family:system-ui,-apple-system,sans-serif}
+    main {max-width:720px;margin:auto;padding:24px 18px 55px}
+    h1 {font-size:29px;margin:18px 0} p {line-height:1.65;color:#b9c7db}
+    .badge {background:#453216;color:#ffde9a;border-radius:10px;padding:9px 12px;display:inline-block;font-weight:650;font-size:14px}
+    .card {background:#1b2940;border:1px solid #344866;border-radius:14px;padding:16px;margin:12px 0}
+    .row {display:flex;justify-content:space-between;gap:10px;align-items:center}
+    .score {color:#83edbb;font-size:23px;font-weight:750;white-space:nowrap}
+    .label {font-size:12px;color:#96aed0;margin-bottom:6px}
+    small {color:#a9bed9;line-height:1.65}
+    button {background:#5f8ef9;color:#fff;border:0;border-radius:12px;padding:13px 18px;font-size:16px;font-weight:bold;cursor:pointer}
+    button:disabled {opacity:.6}
+    .meta {background:#172237;border-radius:12px;padding:13px 15px;margin-top:16px;color:#b9c7db}
+    .warning {color:#ffdc9e} .good {color:#8feac6} .notice {font-size:13px;margin-top:20px}
+    .title {font-size:17px;font-weight:700}
+    .filter {display:flex;justify-content:space-between;align-items:center;margin-top:22px;gap:12px}
+  </style>
+</head>
+<body><main>
+  <h1>📈 종베 스캐너 <small>v3</small></h1>
+  <div class="badge">⚠️ 장 마감 후 일봉 분석 · 실시간 아님</div>
+  <p>코스피·코스닥 <strong>15개 시범 종목</strong>을 무료 일봉으로 분석하고 점수순 상위 10개를 보여줍니다. 평일 16:45(KST) 예약 실행을 시도하며 지연·실패할 수 있습니다.</p>
+  <button id="refresh" type="button">결과 새로고침</button>
+  <div class="meta" id="status" aria-live="polite">데이터 확인 중...</div>
+  <div class="filter"><strong>조건 점수 순위</strong><small>최대 10개 · 투자 추천 아님</small></div>
+  <section id="results"></section>
+  <p class="notice"><small>점수 기준: 종가&gt;5일선 25점, 5일선&gt;20일선 25점, 거래량이 최근 20거래일 평균의 1.5배 이상 20점, 당일 고저가 범위에서 종가 위치 75% 이상 20점, 전일 대비 상승 10점. 거래대금은 실제 체결 거래대금이 아닌 종가×거래량 근사치. 표시된 목표(+3%)·손절(-2%)은 계산 예시이며 권장 가격이 아닙니다. 무료 데이터는 지연·누락될 수 있습니다.</small></p>
+</main>
+<script>
+  const resultEl = document.getElementById('results');
+  const statusEl = document.getElementById('status');
+  const refreshEl = document.getElementById('refresh');
+  const won = n => Number(n).toLocaleString('ko-KR') + '원';
+  const txt = (el, value) => {el.textContent = String(value ?? ''); return el;};
+  const el = (tag, className, value) => {const x=document.createElement(tag);if(className)x.className=className;if(value!==undefined)txt(x,value);return x;};
+  async function load() {
+    refreshEl.disabled=true;
+    txt(statusEl,'데이터 확인 중...');
+    resultEl.replaceChildren();
+    try {
+      const response = await fetch('./results.json?v='+Date.now(), {cache:'no-store'});
+      if (!response.ok) throw new Error('results.json 파일을 읽지 못했습니다 (HTTP '+response.status+')');
+      const data=await response.json();
+      if (!Array.isArray(data.rows)) throw new Error('분석 데이터 형식이 올바르지 않습니다.');
+      let stale='';
+      if (data.asof) {
+        // 데이터 기준일은 YYYY-MM-DD 문자열. 브라우저 시간대에 흔들리지 않도록 KST 정오 사용
+        const age = Math.floor((Date.now()-new Date(data.asof+'T12:00:00+09:00').getTime())/86400000);
+        if (age >= 4) stale=' ⚠️ 기준일이 '+age+'일 전입니다. 최신 데이터인지 확인하세요.';
+      }
+      txt(statusEl, '기준일: '+(data.asof||'없음')+' · 갱신: '+(data.updated||'알 수 없음')+' · 분석 성공 '+(data.analyzed_count??data.rows.length)+'/'+(data.universe_size??'?')+'종목'+stale);
+      if(!data.rows.length) {
+        resultEl.append(el('p','warning','아직 분석 결과가 없습니다. GitHub Actions → Jongbe daily scan and publish → Run workflow를 실행하세요.'));
+        return;
+      }
+      for (const x of data.rows) {
+        const card=el('article','card');
+        const top=el('div','row');
+        top.append(el('div','title',x.name+' ('+x.code+')'),el('span','score',x.score+'점'));
+        const info=el('p','', '기준일 '+(x.date||data.asof||'-')+' · 종가 '+won(x.price)+' · 전일 대비 '+x.change+'%');
+        const details=el('small','', '거래대금 추정 '+x.value_eok+'억원 · 거래량 배수 '+x.volume_ratio+'배 · 종가 위치 '+x.close_position+'%');
+        card.append(top,info,details);
+        resultEl.append(card);
+      }
+      if (data.errors?.length) resultEl.append(el('p','warning','일부 종목 조회 실패: '+data.errors.length+'개 (오류 상세는 Actions 실행 기록 참조)'));
+    } catch(error) {
+      txt(statusEl, '데이터를 읽지 못했습니다: '+error.message);
+      resultEl.append(el('p','warning','자동 실행과 사이트 배포가 완료됐는지 GitHub Actions를 확인하세요.'));
+    } finally {refreshEl.disabled=false;}
+  }
+  refreshEl.addEventListener('click',load);
+  load();
+</script>
+</body></html>

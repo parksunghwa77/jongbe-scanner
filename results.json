@@ -1,0 +1,9 @@
+{
+  "asof": null,
+  "updated": "첫 자동 분석 전",
+  "rows": [],
+  "analyzed_count": 0,
+  "universe_size": 15,
+  "errors": [],
+  "notice": "실제 데이터를 아직 수집하지 않았습니다. GitHub Actions를 실행하세요."
+}
