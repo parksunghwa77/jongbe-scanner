@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="theme-color" content="#f4f8ff">
-  <title>종베 스캐너 v6.7 · 밝은 차트·확대축소·5분봉</title>
+  <title>종베 스캐너 v6.8 · 일목 구름대와 일봉 차트</title>
   <style>
     :root{color-scheme:light}*{box-sizing:border-box}
     body{margin:0;background:#101827;color:#f3f6fe;font-family:system-ui,-apple-system,"Noto Sans KR",sans-serif}
@@ -89,7 +89,7 @@
     .v6-inline{font-size:12px;color:#abc6ee}.v6-refresh{padding:10px 15px}
     @media(max-width:360px){.v6-stats{gap:4px}.v6-stat strong{font-size:17px}.v6-stat span{font-size:10px}}
 
-    /* v6.5: 개별 종목의 과거 확정 일봉 차트 */
+    /* v6.8: 밝은 확정 일봉 차트 + 일목균형표 구름대 */
     /* 차트는 각 종목 카드에서 항상 보인다. 화면 근처 진입 시 자동 로딩한다. */
     .chart-inline{margin-top:12px;border:1px solid #375477;border-radius:10px;background:#152238;overflow:hidden}
     .chart-inline-title{padding:12px;font-weight:750;color:#d4e7ff;border-bottom:1px solid #375477}
@@ -164,21 +164,20 @@
     .chart-level.support{color:#087853;border-color:#7acaa5}
     .chart-level.breakout{background:#d5f6e5;color:#087b50;border-color:#7acaa5}
     .chart-level.breakdown{background:#ffeced;color:#aa394d;border-color:#e7a0a9}
-    .chart-times button,.chart-modes button,.chart-zoom button{background:#eaf2ff;color:#28569a;border:1px solid #bbd1ef;padding:8px 11px;font-size:13px;border-radius:8px}
-    .chart-times button.active,.chart-modes button.active{background:#376fdb;color:white;border-color:#2f64c8}
-    .chart-modes{display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap}
+    .chart-times button,.chart-zoom button{background:#eaf2ff;color:#28569a;border:1px solid #bbd1ef;padding:8px 11px;font-size:13px;border-radius:8px}
+    .chart-times button.active{background:#376fdb;color:white;border-color:#2f64c8}
+    .chart-mode-note{font-size:13px;color:#385c83;font-weight:750;margin:0 0 10px}
     .chart-zoom{display:flex;align-items:center;gap:7px;flex-wrap:wrap;margin:8px 0 11px}
     .chart-zoom small{font-size:12px}
     .chart-zoom button{font-size:16px;padding:5px 12px;font-weight:750}
-    .chart-minute-container{min-height:460px;border:1px solid #cadcf1;border-radius:10px;overflow:hidden;background:#fff}
-    .chart-minute-container .tradingview-widget-container{width:100%;height:435px}
-    .chart-provider-caption{color:#506987;font-size:12px;line-height:1.6;margin:9px 0}
+    .chart-cloud-status{border-radius:9px;background:#edf4fd;border:1px solid #bbcee7;color:#315276;font-size:12px;line-height:1.6;margin:8px 0 11px;padding:9px 11px}
+    .chart-zoom button.cloud-toggle{background:#d5f5e8;border-color:#76bca0;color:#076745}
+    .chart-zoom button.cloud-toggle.off{background:#eef1f7;border-color:#c7d1df;color:#596a80}
     a{color:#2359b5}
-    @media(max-width:370px){.chart-modes button{padding:8px 9px}}
   </style>
 </head>
 <body><main>
-  <h1 class="app-title">📈 종베 스캐너 <span>v6.7</span></h1>
+  <h1 class="app-title">📈 종베 스캐너 <span>v6.8</span></h1>
   <div class="status-pill">🔎 읽기 전용 · 투자 추천 아님</div>
   <nav class="switcher" aria-label="분석 화면 선택">
     <button id="tabv6" type="button" class="selected" aria-pressed="true">v6 장중 관찰</button>
@@ -188,7 +187,7 @@
     <div class="v6-hero">
       <div class="v6-heading">🛰️ 오후 2시 30분 장중 관찰</div>
       <p>나무증권 API로 관심종목과 전날 일봉 후보 <b>최대 55종목</b>을 평가한 점수를 표시합니다. 나무증권 API의 장중 원시 시세는 공개 웹사이트에 게시하지 않습니다. 회사 상세 차트는 별도의 공개 마감 일봉을 사용합니다.</p>
-      <small>평일 14:30(KST) 예약 시도 · GitHub Actions 실행 지연 가능 · 실시간 스트리밍/5분봉 아님</small>
+      <small>평일 14:30(KST) 예약 시도 · GitHub Actions 실행 지연 가능 · 일봉 차트와 장중 점수 기준일 다름</small>
     </div>
     <div class="v6-controls">
       <button id="v6refresh" type="button" class="v6-refresh">v6 결과 새로고침</button>
@@ -214,7 +213,7 @@
     <h2>확정 일봉 전종목 · 정배열·골든크로스·추세 색상 검색</h2>
   <div class="badge">⚠️ 장 마감 후 확정 일봉 · 실시간 아님</div>
   <p>코스피·코스닥 공개 일봉을 평가하고 과거 후보의 다음 거래일 변화를 함께 검증합니다. <b>점수는 상승 확률이나 매수 추천이 아닙니다.</b></p>
-  <p class="chart-caption">📈 <b>각 종목 카드에 주가 차트가 자동으로 보입니다.</b> 1일봉·5분봉 전환과 두 손가락 확대·축소, 밝은 화면을 지원합니다. 스크롤하면 차트가 자동 로딩됩니다. 🏢 회사 이름을 누르면 기업 기본정보가 열립니다. 차트에는 5·20·200일선, 거래량, 최근 20거래일 지지·저항 참고선과 종가 돌파 표시가 있습니다. 실시간 시세가 아닙니다.</p>
+  <p class="chart-caption">📈 <b>각 종목 카드에 주가 차트가 자동으로 보입니다.</b> 확정 1일봉과 일목균형표 구름대(표시·숨기기), 두 손가락 확대·축소, 밝은 화면을 지원합니다. 스크롤하면 차트가 자동 로딩됩니다. 🏢 회사 이름을 누르면 기업 기본정보가 열립니다. 차트에는 5·20·200일선, 일목 구름대(9·26·52, 26거래일 선행), 거래량, 최근 20거래일 지지·저항 참고선과 종가 돌파 표시가 있습니다. 실시간 시세가 아닙니다.</p>
   <div class="bar"><button id="refresh" type="button">결과 새로고침</button><small>평일 18:15 및 월~토 09:30(KST) 재확인 예약 · 지연/실패 가능</small></div>
   <div class="meta" id="status" role="status" aria-live="polite">분석 데이터 확인 중...</div>
   <div class="fresh-alert" id="freshness" role="alert" hidden></div>
@@ -247,7 +246,7 @@
   <div class="titlebar"><h2>조건 검색 결과</h2><small id="counter">0개</small></div>
   <section id="results" aria-label="종목 검색 결과"></section>
   <div class="pager"><button id="more" type="button" hidden>20개 더 보기</button></div>
-  <p class="rules">회사명을 누르면 기본정보와 차트가 열립니다. 업종·대표·제품 정보는 KIND 접속이 가능할 때만 표시하며, 미수집 정보는 추정하지 않습니다. 개별 일봉 차트는 공개 마감 데이터만 사용하며 1년 기준 약 252거래일을 표시합니다. G=골든크로스, D=데드크로스, 20/200=각 이동평균선 상향 돌파입니다. 이들은 확정 일봉의 과거 발생 지점이며 매수 신호가 아닙니다. <b>차트는 현재 v5 확정 일봉 데이터이며 v6 장중 시세와 다른 기준일일 수 있습니다.</b> 점수 기준: 종가&gt;5일 평균선 +25점, 5일선&gt;20일선 +25점, 거래량&gt;이전 20거래일 평균의 1.5배 +20점, 당일 고저가 대비 종가 위치≥75% +20점, 당일 등락률 양수 +10점. 최대 100점. <b>거래대금은 KRX에서 제공한 실제 누적 거래대금</b>을 사용합니다. 거래정지·신규 상장 등 최근 55거래일 자료가 불완전한 종목은 점수 계산에서 제외합니다. 200일선은 200거래일, 200일선 기울기는 205거래일의 종가가 확보되어야 표시됩니다. 부족하면 ‘자료 부족’으로 나타납니다. <b>정배열: 5일선 &gt; 20일선 &gt; 200일선, 오늘 골든크로스: 전 거래일 5일선 ≤ 20일선이면서 당일 5일선 &gt; 20일선.</b> 색상별 추세 판정은 20·200일선의 5거래일 변화와 이평 배치를 이용한 규칙 분류입니다. 기간 및 변화율 기준에 따라 결과는 달라질 수 있으며 강한 상승/하락, 상승 시도/하락 경계 모두 예측이나 매매 신호가 아닙니다. 거래일별 종가를 이용한 판정이며 필터 적용은 기존 점수 계산 기준을 변경하지 않습니다. 우선주·스팩 등도 포함될 수 있습니다. 과거 결과의 다음날 종가 변화는 참고용 관찰값일 뿐 투자 수익이나 미래 성과를 보장하지 않습니다. 외국인·기관·프로그램 매매 분석 및 14:30 장중 실시간 검색은 제공하지 않습니다. FinanceData/marcap 원본은 갱신이 늦어질 수 있습니다. 화면의 <b>기준일과 기대 거래일</b>을 반드시 확인하세요. 최신 시세가 없을 때 표시되는 종목은 과거 기록입니다.</p>
+  <p class="rules">차트는 자동 표시되고 회사명을 누르면 기본정보가 열립니다. 업종·대표·제품 정보는 KIND 접속이 가능할 때만 표시하며, 미수집 정보는 추정하지 않습니다. 개별 일봉 차트는 공개 마감 데이터만 사용하며 1년 기준 약 252거래일을 표시합니다. G=골든크로스, D=데드크로스, 20/200=각 이동평균선 상향 돌파입니다. 이들은 확정 일봉의 과거 발생 지점이며 매수 신호가 아닙니다. <b>차트는 현재 v5 확정 일봉 데이터이며 v6 장중 시세와 다른 기준일일 수 있습니다.</b> 점수 기준: 종가&gt;5일 평균선 +25점, 5일선&gt;20일선 +25점, 거래량&gt;이전 20거래일 평균의 1.5배 +20점, 당일 고저가 대비 종가 위치≥75% +20점, 당일 등락률 양수 +10점. 최대 100점. <b>거래대금은 KRX에서 제공한 실제 누적 거래대금</b>을 사용합니다. 거래정지·신규 상장 등 최근 55거래일 자료가 불완전한 종목은 점수 계산에서 제외합니다. 200일선은 200거래일, 200일선 기울기는 205거래일의 종가가 확보되어야 표시됩니다. 부족하면 ‘자료 부족’으로 나타납니다. <b>정배열: 5일선 &gt; 20일선 &gt; 200일선, 오늘 골든크로스: 전 거래일 5일선 ≤ 20일선이면서 당일 5일선 &gt; 20일선.</b> 색상별 추세 판정은 20·200일선의 5거래일 변화와 이평 배치를 이용한 규칙 분류입니다. 기간 및 변화율 기준에 따라 결과는 달라질 수 있으며 강한 상승/하락, 상승 시도/하락 경계 모두 예측이나 매매 신호가 아닙니다. 거래일별 종가를 이용한 판정이며 필터 적용은 기존 점수 계산 기준을 변경하지 않습니다. 우선주·스팩 등도 포함될 수 있습니다. 과거 결과의 다음날 종가 변화는 참고용 관찰값일 뿐 투자 수익이나 미래 성과를 보장하지 않습니다. 외국인·기관·프로그램 매매 분석 및 14:30 장중 실시간 검색은 제공하지 않습니다. FinanceData/marcap 원본은 갱신이 늦어질 수 있습니다. 화면의 <b>기준일과 기대 거래일</b>을 반드시 확인하세요. 최신 시세가 없을 때 표시되는 종목은 과거 기록입니다.</p>
   </section>
 </main>
 <script>
@@ -282,7 +281,7 @@ function displayBacktest(bt){
 
 /* v6.5 차트: 공개 확정 일봉 데이터만 로드. 시세 제공 API 토큰을 브라우저에 전달하지 않는다. */
 const chartBundles = new Map();
-const chartColors = {resistance:'#bc7614',support:'#12805f',breakout:'#047857',up:'#e34e61',down:'#2474d9',ma5:'#1b62ca',ma20:'#e47d13',ma200:'#9d5de0',volume:'#8294b5',grid:'#d7e2f0',text:'#425b78',golden:'#129e6a',dead:'#e17934'};
+const chartColors = {cloudUp:'#2aaa76',cloudDown:'#e25d6e',tenkan:'#148eaa',kijun:'#ae5bb0',resistance:'#bc7614',support:'#12805f',breakout:'#047857',up:'#e34e61',down:'#2474d9',ma5:'#1b62ca',ma20:'#e47d13',ma200:'#9d5de0',volume:'#8294b5',grid:'#d7e2f0',text:'#425b78',golden:'#129e6a',dead:'#e17934'};
 let chartDateVersion='';
 function clearChartCacheIfDateChanged(){
   if(chartDateVersion!==infoDate){chartBundles.clear();chartDateVersion=infoDate;}
@@ -405,6 +404,43 @@ function addChartInline(card,code,group='v5'){
   }
   return section;
 }
+
+// 일목균형표 표준 9·26·52 / 26거래일 선행. 확정 OHLC에서 계산하고 미래 가격을 사용하지 않는다.
+// chartSeries 인덱스: [날짜,시가,고가,저가,종가,거래량,5일,20일,200일,신호]
+function computeIchimoku(rows){
+  const forward=26,n=rows.length;
+  const tenkan=Array(n).fill(null),kijun=Array(n).fill(null);
+  const spanA=Array(n+forward).fill(null),spanB=Array(n+forward).fill(null);
+  const midpoint=(end,period)=>{
+    if(end<period-1)return null;
+    let high=-Infinity,low=Infinity;
+    for(let j=end-period+1;j<=end;j++){
+      const r=rows[j];
+      if(!Number.isFinite(r[2])||!Number.isFinite(r[3]))return null;
+      high=Math.max(high,r[2]); low=Math.min(low,r[3]);
+    }
+    return (high+low)/2;
+  };
+  for(let i=0;i<n;i++){
+    tenkan[i]=midpoint(i,9);
+    kijun[i]=midpoint(i,26);
+    const a=Number.isFinite(tenkan[i])&&Number.isFinite(kijun[i])?(tenkan[i]+kijun[i])/2:null;
+    const b=midpoint(i,52);
+    // 선행스팬 A/B는 계산일에서 26개의 확정 일봉 칸 오른쪽에 그린다.
+    if(a!==null)spanA[i+forward]=a;
+    if(b!==null)spanB[i+forward]=b;
+  }
+  return {tenkan,kijun,spanA,spanB,forward};
+}
+function cloudPosition(ichimoku,index,close){
+  const a=ichimoku.spanA[index],b=ichimoku.spanB[index];
+  if(!Number.isFinite(a)||!Number.isFinite(b)||!Number.isFinite(close))return '☁️ 구름대 계산 자료 부족';
+  const hi=Math.max(a,b),lo=Math.min(a,b);
+  const where=close>hi?'구름 위':close<lo?'구름 아래':'구름 안';
+  const color=a>=b?'초록':'빨강';
+  return `☁️ 종가 ${where} · ${color} 구름 · 구름 상단 ${fmt(Math.round(hi))}원 / 하단 ${fmt(Math.round(lo))}원`;
+}
+
 // 최근 20거래일 기준 고가/저가 (해당 거래일은 제외하여 미래 정보가 섞이지 않음).
 function supportResistance(rows,index){
   if(!Array.isArray(rows)||index<20||index>=rows.length)return null;
@@ -419,7 +455,7 @@ function buildChart(parent,rows,code){
   parent.replaceChildren();
   const controls=elem('div','chart-times');
   const legend=elem('div','chart-legend');
-  for(const [label,color] of [['상승 봉',chartColors.up],['하락 봉',chartColors.down],['5일선',chartColors.ma5],['20일선',chartColors.ma20],['200일선',chartColors.ma200],['거래량',chartColors.volume],['B: 저항 돌파',chartColors.breakout],['20일 저항',chartColors.resistance],['20일 지지',chartColors.support]]){
+  for(const [label,color] of [['상승 봉',chartColors.up],['하락 봉',chartColors.down],['5일선',chartColors.ma5],['20일선',chartColors.ma20],['200일선',chartColors.ma200],['구름 상승',chartColors.cloudUp],['구름 하락',chartColors.cloudDown],['전환선(9)',chartColors.tenkan],['기준선(26)',chartColors.kijun],['거래량',chartColors.volume],['B: 저항 돌파',chartColors.breakout],['20일 저항',chartColors.resistance],['20일 지지',chartColors.support]]){
     const span=elem('span');const key=elem('i','legend-key');key.style.background=color;
     span.append(key,document.createTextNode(label));legend.append(span);
   }
@@ -436,58 +472,33 @@ function buildChart(parent,rows,code){
   }
   const scroller=elem('div','chart-scroll');
   const canvas=elem('canvas','chart-canvas');
-  canvas.height=330;canvas.setAttribute('role','img');canvas.setAttribute('aria-label',code+' 일봉 캔들 및 5, 20, 200일 이동평균선과 거래량');
+  canvas.height=330;canvas.setAttribute('role','img');canvas.setAttribute('aria-label',code+' 일봉 캔들, 일목 구름대, 5·20·200일 이동평균선과 거래량');
   scroller.append(canvas);
   const infobar=elem('div','chart-detail');
-  const caption=elem('div','chart-caption',`📅 확정 일봉 기준일 ${infoDate} · 자료기간 ${rows[0][0]}~${rows[rows.length-1][0]} · 지지/저항은 기준일 이전 20거래일의 최고가·최저가로 계산하는 단순 참고선입니다. 기준일 종가가 이전 20일 고가를 넘으면 돌파로 표시합니다. 가격 돌파가 미래 상승이나 매수를 보장하지 않습니다. 손가락으로 차트를 좌우로 밀고 봉을 눌러 확인하세요.`);
-  // v6.7: 확정 1일봉은 자체 차트, 5분봉은 공개 외부 제공 차트.
-  // 브라우저에 NH투자증권 인증키를 전달하거나 일봉으로 가짜 5분봉을 만들지 않는다.
-  const modeBar=elem('div','chart-modes');
-  const dailyBtn=elem('button','active','📆 1일봉');dailyBtn.type='button';dailyBtn.setAttribute('aria-pressed','true');
-  const minuteBtn=elem('button','','⏱ 5분봉');minuteBtn.type='button';minuteBtn.setAttribute('aria-pressed','false');
-  modeBar.append(dailyBtn,minuteBtn);
-  const dailyBox=elem('div');
-  const zoomBar=elem('div','chart-zoom');
-  const zoomOut=elem('button','','−');zoomOut.type='button';zoomOut.setAttribute('aria-label','차트 축소');
-  const zoomIn=elem('button','','+');zoomIn.type='button';zoomIn.setAttribute('aria-label','차트 확대');
-  const zoomReset=elem('button','','기본');zoomReset.type='button';
-  const zoomHint=elem('small','','두 손가락으로 확대·축소 · 한 손가락으로 좌우 이동');
-  zoomBar.append(zoomOut,zoomIn,zoomReset,zoomHint);
-  dailyBox.append(controls,srInfo,legend,zoomBar,scroller,infobar,caption);
-  const minuteBox=elem('section');minuteBox.hidden=true;
-  const providerNotice=elem('p','chart-provider-caption','5분봉은 TradingView 외부 차트입니다. 표시 가격·시간·제공 여부가 자체 확정 일봉과 다를 수 있고, 지연·제한될 수 있습니다. 실시간 매매 근거로 단독 사용하지 마세요.');
-  const providerWrap=elem('div','chart-minute-container');
-  const providerLink=elem('a','','TradingView에서 차트 직접 확인 ↗');
-  providerLink.href='https://kr.tradingview.com/symbols/KRX-'+encodeURIComponent(code)+'/';
-  providerLink.target='_blank';providerLink.rel='noopener noreferrer';
-  minuteBox.append(providerNotice,providerWrap,elem('p','chart-provider-caption','외부 차트가 비어 있거나 5분봉을 제공하지 않으면 이 링크를 사용하세요: '),providerLink);
-  parent.append(modeBar,dailyBox,minuteBox);
-  let minuteLoaded=false;
-  function loadMinute(){
-    if(minuteLoaded)return;
-    minuteLoaded=true;
-    const tv=elem('div','tradingview-widget-container');
-    const tvInner=elem('div','tradingview-widget-container__widget');
-    tv.style.height='435px';tv.style.width='100%';tvInner.style.height='100%';
-    tv.append(tvInner);providerWrap.replaceChildren(tv);
-    const options={autosize:true,symbol:'KRX:'+code,interval:'5',timezone:'Asia/Seoul',theme:'light',style:'1',locale:'kr',allow_symbol_change:false,hide_top_toolbar:false,hide_side_toolbar:true,hide_legend:false,hide_volume:false,withdateranges:false,save_image:false,backgroundColor:'#ffffff',gridColor:'rgba(50,80,130,0.08)',support_host:'https://www.tradingview.com'};
-    const script=document.createElement('script');
-    script.type='text/javascript';script.src='https://s3.tradingview.com/external-embedding/embed-widget-advanced-chart.js';script.async=true;
-    script.textContent=JSON.stringify(options);tv.append(script);
-    script.addEventListener('error',()=>{providerWrap.prepend(elem('p','chart-error','외부 차트 연결 실패. 아래 TradingView 링크에서 확인해 주세요.'));});
-  }
-  dailyBtn.addEventListener('click',()=>{
-    dailyBox.hidden=false;minuteBox.hidden=true;
-    dailyBtn.classList.add('active');minuteBtn.classList.remove('active');
-    dailyBtn.setAttribute('aria-pressed','true');minuteBtn.setAttribute('aria-pressed','false');
-    requestAnimationFrame(()=>paint(false));
-  });
-  minuteBtn.addEventListener('click',()=>{
-    dailyBox.hidden=true;minuteBox.hidden=false;
-    dailyBtn.classList.remove('active');minuteBtn.classList.add('active');
-    dailyBtn.setAttribute('aria-pressed','false');minuteBtn.setAttribute('aria-pressed','true');
-    loadMinute();
-  });
+  const caption=elem('div','chart-caption',`📅 확정 일봉 기준일 ${infoDate} · 자료기간 ${rows[0][0]}~${rows[rows.length-1][0]} · 구름대는 9·26·52 거래일 고저가 중간값으로 계산해 26거래일 오른쪽에 그리며 오른쪽 끝은 미래 주가 예측이 아닙니다. 지지/저항은 이전 20거래일 고저가 참고선입니다. 신호는 미래 수익을 보장하지 않습니다. 손가락으로 확대·축소하거나 이동해 확인하세요.`);
+
+// v6.8: 확정 1일봉 차트 전용.
+const dailyBox=elem('div');
+const modeNote=elem('div','chart-mode-note','📆 1일봉 · 확정 일봉 / 실시간 시세 아님');
+const cloudStatus=elem('div','chart-cloud-status');
+const zoomBar=elem('div','chart-zoom');
+const zoomOut=elem('button','','−');zoomOut.type='button';zoomOut.setAttribute('aria-label','차트 축소');
+const zoomIn=elem('button','','+');zoomIn.type='button';zoomIn.setAttribute('aria-label','차트 확대');
+const zoomReset=elem('button','','기본');zoomReset.type='button';
+const cloudBtn=elem('button','cloud-toggle','☁️ 구름대 켜짐');cloudBtn.type='button';cloudBtn.setAttribute('aria-pressed','true');
+const zoomHint=elem('small','','두 손가락 확대·축소 · 한 손가락 이동');
+zoomBar.append(zoomOut,zoomIn,zoomReset,cloudBtn,zoomHint);
+dailyBox.append(modeNote,controls,srInfo,legend,cloudStatus,zoomBar,scroller,infobar,caption);
+parent.append(dailyBox);
+const ichimoku=computeIchimoku(rows);
+let showCloud=true;
+cloudBtn.addEventListener('click',()=>{
+  showCloud=!showCloud;
+  cloudBtn.textContent=showCloud?'☁️ 구름대 켜짐':'☁️ 구름대 꺼짐';
+  cloudBtn.classList.toggle('off',!showCloud);
+  cloudBtn.setAttribute('aria-pressed',String(showCloud));
+  paint(false);
+});
   let zoomScale=1;
   let currentPeriod=63;
   let selected=null;
@@ -510,22 +521,33 @@ function buildChart(parent,rows,code){
     return `${row[0]} | 시가 ${fmt(row[1])} / 고가 ${fmt(row[2])} / 저가 ${fmt(row[3])} / 종가 ${fmt(row[4])}원 · 거래량 ${fmt(row[5])}주${signal.length?' · '+signal.join(', '):''}`;
   }
   function paint(scrollRight=false){
-    if(dailyBox.hidden)return;
     const oldScroll=scroller.scrollLeft;
     const view=rows.slice(-currentPeriod);
     if(!view.length){text(infobar,'차트 자료 없음');return;}
     const desired=currentPeriod<=21?13:(currentPeriod<=63?9:(currentPeriod<=126?7:5.5));
     const gutter=58, right=15;
-    const width=Math.max(Math.floor(scroller.clientWidth)-2,Math.ceil(gutter+right+view.length*desired*zoomScale));
+    const projectedBars=showCloud?ichimoku.forward:0;
+    const totalBars=view.length+projectedBars;
+    const width=Math.max(Math.floor(scroller.clientWidth)-2,Math.ceil(gutter+right+totalBars*desired*zoomScale));
     const height=330;
     canvas.style.width=width+'px';canvas.style.height=height+'px';
     const ratio=Math.min(window.devicePixelRatio||1,2);
     canvas.width=Math.floor(width*ratio);canvas.height=Math.floor(height*ratio);
     const g=canvas.getContext('2d');g.setTransform(ratio,0,0,ratio,0,0);
     const top=24, bottom=239, volTop=266, volBottom=309;
-    const span=(width-gutter-right)/view.length;
+    const span=(width-gutter-right)/totalBars;
+    const viewStart=rows.length-view.length;
     const values=[];
     for(const r of view){values.push(r[2],r[3]);for(const k of [6,7,8])if(Number.isFinite(r[k]))values.push(r[k]);}
+    // 일목 구름대의 모든 그려지는 영역과 전환선·기준선을 가격축 범위에 포함한다.
+    if(showCloud){
+      for(let p=viewStart;p<rows.length+ichimoku.forward;p++){
+        for(const v of [ichimoku.spanA[p],ichimoku.spanB[p]])if(Number.isFinite(v))values.push(v);
+        if(p<rows.length){
+          for(const v of [ichimoku.tenkan[p],ichimoku.kijun[p]])if(Number.isFinite(v))values.push(v);
+        }
+      }
+    }
     // 최신 20거래일 저항·지지선도 표시 범위에 포함된다.
     if(latestLevel)values.push(latestLevel.resistance,latestLevel.support);
     let min=Math.min(...values),max=Math.max(...values),pad=Math.max((max-min)*0.08,max*0.004,1);
@@ -540,6 +562,38 @@ function buildChart(parent,rows,code){
       g.strokeStyle=chartColors.grid;g.beginPath();g.moveTo(gutter,y);g.lineTo(width-right,y);g.stroke();
       g.fillStyle=chartColors.text;g.fillText(fmt(Math.round(max-(max-min)*k/4)),gutter-7,y);
     }
+
+// 반투명 일목 구름대(선행스팬 A/B): 위치를 26봉 앞에 그린 값.
+if(showCloud){
+  for(let i=1;i<totalBars;i++){
+    const prev=viewStart+i-1,cur=viewStart+i;
+    const a0=ichimoku.spanA[prev],b0=ichimoku.spanB[prev];
+    const a1=ichimoku.spanA[cur],b1=ichimoku.spanB[cur];
+    if(![a0,b0,a1,b1].every(Number.isFinite))continue;
+    const x0=center(i-1),x1=center(i);
+    const avgA=(a0+a1)/2,avgB=(b0+b1)/2;
+    g.beginPath();g.moveTo(x0,mapY(a0));g.lineTo(x1,mapY(a1));
+    g.lineTo(x1,mapY(b1));g.lineTo(x0,mapY(b0));g.closePath();
+    g.fillStyle=avgA>=avgB?'rgba(42,170,118,0.20)':'rgba(226,93,110,0.19)';g.fill();
+  }
+  for(const [source,color] of [[ichimoku.spanA,chartColors.cloudUp],[ichimoku.spanB,chartColors.cloudDown]]){
+    g.beginPath();let started=false;g.lineWidth=1.3;g.strokeStyle=color;
+    for(let i=0;i<totalBars;i++){
+      const val=source[viewStart+i];
+      if(!Number.isFinite(val)){started=false;continue;}
+      if(!started){g.moveTo(center(i),mapY(val));started=true;}
+      else g.lineTo(center(i),mapY(val));
+    }g.stroke();
+  }
+  // 26거래일 이후의 구름 전망 영역은 과거 계산값을 앞쪽에 배치한 것일 뿐 미래 예측이 아님.
+  if(projectedBars>0){
+    const boundary=gutter+span*view.length;
+    g.beginPath();g.setLineDash([3,5]);g.strokeStyle='#7086a2';
+    g.moveTo(boundary,top);g.lineTo(boundary,bottom);g.stroke();g.setLineDash([]);
+    g.fillStyle=chartColors.text;g.font='10px system-ui';g.textAlign='left';
+    g.fillText('26봉 선행 표시',Math.min(width-92,boundary+4),top+10);
+  }
+}
     // 우측 끝 기준 최근 20거래일 참고선을 가격 차트에 자동 겹쳐 그린다.
     if(latestLevel){
       for(const [price,col,label] of [
@@ -585,6 +639,19 @@ function buildChart(parent,rows,code){
         if(!started){g.moveTo(center(i),mapY(val));started=true;}else g.lineTo(center(i),mapY(val));
       });g.stroke();
     }
+
+// 전환선(9), 기준선(26)은 선행시키지 않고 계산 날짜 위치에 그린다.
+if(showCloud){
+  for(const [source,color] of [[ichimoku.tenkan,chartColors.tenkan],[ichimoku.kijun,chartColors.kijun]]){
+    g.beginPath();let started=false;g.strokeStyle=color;g.lineWidth=1.2;
+    view.forEach((r,i)=>{
+      const val=source[viewStart+i];
+      if(!Number.isFinite(val)){started=false;return;}
+      if(!started){g.moveTo(center(i),mapY(val));started=true;}
+      else g.lineTo(center(i),mapY(val));
+    });g.stroke();
+  }
+}
     g.font='10px system-ui';g.fillStyle=chartColors.text;g.textAlign='center';
     const step=Math.max(1,Math.ceil(view.length/5));
     for(let i=0;i<view.length;i+=step)g.fillText(view[i][0].slice(5),center(i),324);
@@ -592,6 +659,9 @@ function buildChart(parent,rows,code){
       const x=center(selected);g.setLineDash([3,4]);g.strokeStyle='#506480';g.beginPath();g.moveTo(x,top);g.lineTo(x,volBottom);g.stroke();g.setLineDash([]);
     }
     text(infobar,selectedInfo(view[selected===null?view.length-1:selected]));
+    const cloudToday=cloudPosition(ichimoku,rows.length-1,Number(rows[rows.length-1][4]));
+    text(cloudStatus,showCloud?`${cloudToday} · 구름 끝의 26봉은 앞당겨 그린 지표이며 미래 주가 예측이 아닙니다.`:
+      '☁️ 구름대 숨김 · 버튼을 누르면 전환선·기준선과 함께 표시됩니다.');
     drawResult={view,gutter,span};
     requestAnimationFrame(()=>{scroller.scrollLeft=scrollRight?scroller.scrollWidth-scroller.clientWidth:oldScroll;});
   }
