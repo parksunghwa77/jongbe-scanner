@@ -1,4 +1,4 @@
-"""종베 스캐너 v4.2: 기준일 검증 + 업스트림 지연 명시.
+"""종베 스캐너 v5: 거래일 지연 검증 + 과거 후보의 다음날 성과 추적.
 
 FinanceData/marcap 공개 일봉 데이터는 당일 종가가 늦게 반영될 수 있습니다.
 거래소 XKRX 거래일 캘린더 기준의 기대 기준일과 원본 최신 거래일을
@@ -27,7 +27,9 @@ import exchange_calendars as xcals
 ROOT = Path(__file__).resolve().parent
 OUT = ROOT / 'results.json'
 KST = ZoneInfo('Asia/Seoul')
-HISTORY_DAYS = 21
+HISTORY_DAYS = 55
+BACKTEST_DAYS = 15
+BACKTEST_TOP_N = 10
 MAX_STALE_CALENDAR_DAYS = 12
 MAX_LAG_SESSIONS = 5  # 소스가 이보다 오래됐으면 배포 중지
 DATA_URL = 'https://raw.githubusercontent.com/FinanceData/marcap/master/data/marcap-{year}.parquet'
@@ -166,15 +168,80 @@ def analyze(df: pd.DataFrame, now: dt.datetime) -> dict:
             'value_eok':round(float(r['거래대금'])/1e8,1),
             'close_position':round(float(pos.loc[code]),1),'volume_ratio':round(float(ratio.loc[code]),2),
             'ma5':round(float(ma5.loc[code]),2), 'ma20':round(float(ma20.loc[code]),2),
-            'score':int(score.loc[code])
+            'score':int(score.loc[code]),
+            'watch':bool(score.loc[code]>=70 and float(r['거래대금'])>=1e10 and 0<float(change.loc[code])<=15 and float(pos.loc[code])>=60),
+            'chase_risk':bool(float(change.loc[code])>=15)
         })
     rows.sort(key=lambda x:(-x['score'],-x['value_eok'],x['code']))
+    backtest=historical_forward_check(history)
     return {
+        'backtest':backtest,
         'asof':latest_date,'updated':now.strftime('%Y-%m-%d %H:%M KST'),
-        'version':4, 'minor_version':'4.2', 'source':'FinanceData/marcap',
+        'version':5, 'minor_version':'5.0', 'source':'FinanceData/marcap',
         'universe_size':int(len(latest)),
         'analyzed_count':len(rows),'history_days':HISTORY_DAYS,'rows':rows,
         'notice':'서드파티 공개 KRX 데이터셋 기반의 장 마감 후 분석. 실시간 시세 아님. 점수는 상승 확률 아님.'
+    }
+
+
+
+def historical_forward_check(history):
+    """15개 과거 마감일의 관찰조건 충족 종목의 다음 거래일 종가 변화.
+
+    후보 추출에 미래 자료를 쓰지 않음. 누락된 다음날 가격은 누락으로 세며
+    생존 종목만의 성과로 오인되지 않게 결과에서 명시한다.
+    이 수치는 모의 매매 성과(체결/비용/미끄러짐)가 아니다.
+    """
+    import statistics
+    daily=[]; all_returns=[]; missing=0; total_selected=0
+    begin=max(20,len(history)-1-BACKTEST_DAYS)
+    for idx in range(begin,len(history)-1):
+        date, frame = history[idx]
+        window=history[idx-20:idx+1]
+        c=pd.concat([f['종가'].rename(d) for d,f in window],axis=1)
+        v=pd.concat([f['거래량'].rename(d) for d,f in window],axis=1)
+        valid=(c.notna().all(axis=1)&(c>0).all(axis=1)&v.notna().all(axis=1)&(v.iloc[:,:-1]>0).all(axis=1))
+        current=frame.loc[frame.index.intersection(c.index[valid])].copy()
+        if current.empty:
+            continue
+        c=c.loc[current.index];v=v.loc[current.index]
+        ma5=c.iloc[:,-5:].mean(axis=1);ma20=c.iloc[:,-20:].mean(axis=1)
+        volratio=v.iloc[:,-1]/v.iloc[:,:-1].mean(axis=1)
+        rng=(current['고가']-current['저가']).replace(0,float('nan'))
+        position=((current['종가']-current['저가'])/rng*100).fillna(50)
+        change=(current['종가']/c.iloc[:,-2]-1)*100
+        score=((current['종가']>ma5).astype(int)*25+(ma5>ma20).astype(int)*25
+               +(volratio>=1.5).astype(int)*20+(position>=75).astype(int)*20
+               +(change>0).astype(int)*10)
+        eligible=current[(score>=70)&(current['거래대금']>=1e10)&(change>0)&(change<=15)&(position>=60)].copy()
+        eligible['score']=score.reindex(eligible.index)
+        eligible=eligible.sort_values(['score','거래대금'],ascending=False).head(BACKTEST_TOP_N)
+        next_day,next_frame=history[idx+1]
+        returns=[]
+        for code,row in eligible.iterrows():
+            total_selected+=1
+            if code not in next_frame.index:
+                missing+=1
+                continue
+            next_close=next_frame.loc[code,'종가']
+            if not pd.notna(next_close) or next_close<=0:
+                missing+=1
+                continue
+            pct=(float(next_close)/float(row['종가'])-1)*100
+            returns.append(pct);all_returns.append(pct)
+        daily.append({'date':date,'next_date':next_day,
+                      'selected':int(len(eligible)),'observed':len(returns),
+                      'mean_pct':round(statistics.mean(returns),2) if returns else None,
+                      'win_rate_pct':round(sum(x>0 for x in returns)*100/len(returns),1) if returns else None})
+    return {
+      'method':'전일 종가 후보 추출 → 다음 거래일 종가 수익률(종가 대비). 매수/매도 체결을 가정하지 않음.',
+      'days':len(daily),'selected':total_selected,'observed':len(all_returns),'missing_next_day':missing,
+      'average_pct':round(statistics.mean(all_returns),2) if all_returns else None,
+      'median_pct':round(statistics.median(all_returns),2) if all_returns else None,
+      'win_rate_pct':round(sum(x>0 for x in all_returns)*100/len(all_returns),1) if all_returns else None,
+      'by_day':daily,
+      'criteria':'당일 점수 70점 이상, 거래대금 100억원 이상, 상승률 0~15%, 종가 위치 60% 이상 중 점수·거래대금 순 10종목',
+      'caution':'과거 조건부 표본의 기술통계이며 미래 수익률 예측 아님. 거래비용·세금·매매 슬리피지·실제 체결 가능성을 반영하지 않음. 다음날 가격이 없는 종목은 결측으로 별도 집계.'
     }
 
 
