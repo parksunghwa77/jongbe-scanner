@@ -27,7 +27,7 @@ import exchange_calendars as xcals
 ROOT = Path(__file__).resolve().parent
 OUT = ROOT / 'results.json'
 KST = ZoneInfo('Asia/Seoul')
-HISTORY_DAYS = 200
+HISTORY_DAYS = 205  # 현재 200일선과 5거래일 전 200일선까지 계산
 REQUIRED_VALID_DAYS = 55  # 기존 v5와 동일한 분석대상/점수 기준 유지
 BACKTEST_DAYS = 15
 BACKTEST_TOP_N = 10
@@ -85,7 +85,7 @@ def download_year(year: int) -> pd.DataFrame:
 
 
 def get_data(reference: dt.date) -> pd.DataFrame:
-    # 200거래일 평균 계산을 위해 전년도 데이터도 함께 확보한다.
+    # 200일선의 5거래일 전 기울기까지 계산할 205거래일 확보.
     years = [reference.year, reference.year - 1]
     frames = [download_year(y) for y in years]
     df = pd.concat(frames, ignore_index=True)
@@ -160,11 +160,43 @@ def analyze(df: pd.DataFrame, now: dt.datetime) -> dict:
     ma5_prev=close.iloc[:,-6:-1].mean(axis=1)
     ma20_prev=close.iloc[:,-21:-1].mean(axis=1)
     golden_cross=(ma5_prev<=ma20_prev)&(ma5>ma20)
-    # 200거래일 종가가 모두 존재하고 양수인 경우에만 MA200을 계산.
+    dead_cross=(ma5_prev>=ma20_prev)&(ma5<ma20)
+    # 200일선의 기울기를 계산하려면 205거래일 연속 종가가 필요하다.
     closes200 = close.iloc[:, -200:]
     ma200 = closes200.where(closes200 > 0).mean(axis=1, skipna=False)
-    # 5일선 > 20일선 > 200일선: 데이터 200일이 완전할 때만 판정.
+    closes200_prev5=close.iloc[:, -205:-5]
+    ma200_prev5=closes200_prev5.where(closes200_prev5 > 0).mean(axis=1, skipna=False)
+    ma20_prev5=close.iloc[:, -25:-5].mean(axis=1, skipna=False)
+    slope20=(ma20 / ma20_prev5.where(ma20_prev5>0)-1)*100
+    slope200=(ma200 / ma200_prev5.where(ma200_prev5>0)-1)*100
+    # 이전 버전의 정배열/골든크로스 필터 및 점수는 그대로 유지.
     ma_aligned=((ma5>ma20)&(ma20>ma200)).fillna(False)
+    ma_reversed=((ma5<ma20)&(ma20<ma200)).fillna(False)
+    trend_codes={}
+    trend_reasons={}
+    for code in latest.index:
+        current=float(latest.at[code,'종가'])
+        m5=float(ma5.loc[code]); m20=float(ma20.loc[code])
+        sl20=float(slope20.loc[code]) if pd.notna(slope20.loc[code]) else None
+        sl200=float(slope200.loc[code]) if pd.notna(slope200.loc[code]) else None
+        gc=bool(golden_cross.loc[code]);dc=bool(dead_cross.loc[code])
+        if bool(ma_aligned.loc[code]) and current>m5 and sl20 is not None and sl20>=0.2 and sl200 is not None and sl200>0:
+            trend,why='strong_up','종가 > 5일선 > 20일선 > 200일선, 20일선·200일선 모두 상승'
+        elif bool(ma_reversed.loc[code]) and current<m5 and sl20 is not None and sl20<=-0.2 and sl200 is not None and sl200<0:
+            trend,why='strong_down','종가 < 5일선 < 20일선 < 200일선, 20일선·200일선 모두 하락'
+        elif gc:
+            trend,why='rising','5일선이 20일선을 오늘 상향 돌파 (추세 전환 확정 아님)'
+        elif dc:
+            trend,why='falling','5일선이 20일선을 오늘 하향 돌파 (추세 전환 확정 아님)'
+        elif current>m20 and m5>m20 and sl20 is not None and sl20>=0.2:
+            trend,why='rising','종가·5일선이 20일선 위, 최근 5거래일 20일선 상승'
+        elif current<m20 and m5<m20 and sl20 is not None and sl20<=-0.2:
+            trend,why='falling','종가·5일선이 20일선 아래, 최근 5거래일 20일선 하락'
+        else:
+            trend,why='sideways','상승·하락 조건이 뚜렷하지 않은 혼조 또는 횡보 상태'
+        trend_codes[code]=trend
+        trend_reasons[code]=why
+
     # 이전 v5에서는 55일 창의 당일을 제외한 54거래일 평균거래량을 썼음.
     # 새로운 200일 데이터 확보 때문에 기존 점수가 바뀌지 않도록 그 창을 고정.
     prev_volume=volume.iloc[:, -REQUIRED_VALID_DAYS:-1].mean(axis=1)
@@ -187,6 +219,10 @@ def analyze(df: pd.DataFrame, now: dt.datetime) -> dict:
             'ma200':round(float(ma200.loc[code]),2) if pd.notna(ma200.loc[code]) else None,
             'ma_aligned':bool(ma_aligned.loc[code]),
             'golden_cross':bool(golden_cross.loc[code]),
+            'dead_cross':bool(dead_cross.loc[code]),
+            'ma20_slope_5d_pct':round(float(slope20.loc[code]),3) if pd.notna(slope20.loc[code]) else None,
+            'ma200_slope_5d_pct':round(float(slope200.loc[code]),3) if pd.notna(slope200.loc[code]) else None,
+            'trend':trend_codes[code], 'trend_reason':trend_reasons[code],
             'score':int(score.loc[code]),
             'watch':bool(score.loc[code]>=70 and float(r['거래대금'])>=1e10 and 0<float(change.loc[code])<=15 and float(pos.loc[code])>=60),
             'chase_risk':bool(float(change.loc[code])>=15)
@@ -201,6 +237,8 @@ def analyze(df: pd.DataFrame, now: dt.datetime) -> dict:
         'ma200_count':int(ma200.notna().sum()),
         'ma_alignment_count':int(ma_aligned.sum()),
         'golden_cross_count':int(golden_cross.sum()),
+        'trend_counts':{key:sum(x['trend']==key for x in rows) for key in
+                        ['strong_up','rising','sideways','falling','strong_down']},
         'analyzed_count':len(rows),'history_days':HISTORY_DAYS,'rows':rows,
         'notice':'서드파티 공개 KRX 데이터셋 기반의 장 마감 후 분석. 실시간 시세 아님. 점수는 상승 확률 아님.'
     }

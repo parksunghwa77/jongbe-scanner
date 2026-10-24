@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="theme-color" content="#101827">
-  <title>종베 스캐너 v6.3 · 이평 정배열·골든크로스 검색</title>
+  <title>종베 스캐너 v6.4 · 색상별 추세 판정</title>
   <style>
     :root{color-scheme:dark}*{box-sizing:border-box}
     body{margin:0;background:#101827;color:#f3f6fe;font-family:system-ui,-apple-system,"Noto Sans KR",sans-serif}
@@ -36,6 +36,22 @@
     .history th,.history td{border-bottom:1px solid #36475e;padding:8px 3px;text-align:left}
     .alertpill{font-size:11px;background:#66412a;color:#ffe7ba;border-radius:5px;padding:3px 6px;margin-left:6px}
     .goldenpill{font-size:11px;background:#225343;color:#beffde;border-radius:5px;padding:3px 6px;margin-left:6px}
+    .trend-legend{background:#162237;border:1px solid #3a4c66;border-radius:13px;padding:15px;margin:16px 0}
+    .trend-legend h3{font-size:16px;margin:0 0 10px}
+    .trend-line{display:flex;gap:10px;align-items:flex-start;margin:10px 0;font-size:13px;line-height:1.5;color:#c3d2e7}
+    .trend-line .trendbadge{flex-shrink:0;min-width:91px;text-align:center}
+    .trendbadge{display:inline-block;border:1px solid transparent;padding:5px 8px;border-radius:8px;font-size:12px;font-weight:800;margin:3px 0 0}
+    .trendbadge.strong_up{background:#174b37;color:#b3ffd5;border-color:#459873}
+    .trendbadge.rising{background:#173f61;color:#a9d9ff;border-color:#397cad}
+    .trendbadge.sideways{background:#4e421b;color:#ffedab;border-color:#9f8a43}
+    .trendbadge.falling{background:#57371f;color:#ffcb99;border-color:#bd7843}
+    .trendbadge.strong_down{background:#582630;color:#ffc4cb;border-color:#b96372}
+    .trendbadge.unavailable{background:#3a4453;color:#e0e6f0;border-color:#6a7587}
+    .trend-inline{margin:7px 0 2px;font-size:12px;line-height:1.6;color:#c1d3ec}
+    .trend-explain{margin-top:12px;border-top:1px solid #3a4b65;padding-top:10px;color:#bad2ed;font-size:12px;line-height:1.65}
+    .trend-explain summary{cursor:pointer;font-weight:700;color:#d3e3fa;padding:4px 0}
+    .trend-explain p{font-size:12px;margin:6px 0}
+
     .searchblock{display:flex;flex-direction:column;gap:7px}
     .searchblock>label{display:block}
     .searchrow{display:flex;gap:8px}
@@ -75,7 +91,7 @@
   </style>
 </head>
 <body><main>
-  <h1 class="app-title">📈 종베 스캐너 <span>v6.3</span></h1>
+  <h1 class="app-title">📈 종베 스캐너 <span>v6.4</span></h1>
   <div class="status-pill">🔎 읽기 전용 · 투자 추천 아님</div>
   <nav class="switcher" aria-label="분석 화면 선택">
     <button id="tabv6" type="button" class="selected" aria-pressed="true">v6 장중 관찰</button>
@@ -108,13 +124,23 @@
     <p class="v6-note">공개되는 정보는 종목코드·이름·산출 점수·위험 표시·조회 작업 시각만입니다. 나무증권 API 키·인증 토큰·원시 주가·거래량·거래대금은 웹에 게시하지 않습니다. 점수는 상승 확률이나 실전 수익 검증이 아닙니다. <b>v6 결과는 오후 2시 30분 장중 작업 완료 후</b> 게시되며 휴일에는 새 결과를 만들지 않습니다. GitHub 저장소가 공개라 점수는 다른 사람도 볼 수 있습니다.</p>
   </section>
   <section id="v5panel" aria-label="v5 전종목 일봉 검색" hidden>
-    <h2>확정 일봉 전종목 · 정배열·골든크로스 검색</h2>
+    <h2>확정 일봉 전종목 · 정배열·골든크로스·추세 색상 검색</h2>
   <div class="badge">⚠️ 장 마감 후 확정 일봉 · 실시간 아님</div>
   <p>코스피·코스닥 공개 일봉을 평가하고 과거 후보의 다음 거래일 변화를 함께 검증합니다. <b>점수는 상승 확률이나 매수 추천이 아닙니다.</b></p>
   <div class="bar"><button id="refresh" type="button">결과 새로고침</button><small>평일 18:15 및 월~토 09:30(KST) 재확인 예약 · 지연/실패 가능</small></div>
   <div class="meta" id="status" role="status" aria-live="polite">분석 데이터 확인 중...</div>
   <div class="fresh-alert" id="freshness" role="alert" hidden></div>
   <section class="performance" aria-label="과거 종목 관찰 성과" id="backtest"><h2>과거 관찰 조건 검증</h2><p>분석 결과를 불러오는 중...</p></section>
+  <section class="trend-legend" aria-label="색깔별 추세 설명">
+    <h3>🎨 종목 추세 색상 안내 <small>· 확정 일봉 기준 / 예측 아님</small></h3>
+    <div class="trend-line"><span class="trendbadge strong_up">🟢 강한 상승</span><span>종가·5·20·200일선 정배열 + 20·200일선의 5거래일 기울기 상승</span></div>
+    <div class="trend-line"><span class="trendbadge rising">🔵 상승 시도</span><span>5일선이 20일선 상향 돌파, 또는 20일선 상승 속에서 주가·5일선이 20일선 위</span></div>
+    <div class="trend-line"><span class="trendbadge sideways">🟡 횡보·혼조</span><span>상승/하락 조건이 불명확한 상태. 강한 상승·하락 신호에 해당하지 않음</span></div>
+    <div class="trend-line"><span class="trendbadge falling">🟠 하락 경계</span><span>5일선이 20일선 하향 돌파, 또는 20일선 하락 속에서 주가·5일선이 20일선 아래</span></div>
+    <div class="trend-line"><span class="trendbadge strong_down">🔴 강한 하락</span><span>종가·5·20·200일선 역배열 + 20·200일선의 5거래일 기울기 하락</span></div>
+    <div class="trend-line"><span class="trendbadge unavailable">⚪ 자료 미갱신</span><span>새 분석 전이거나 추세 계산 정보가 없는 종목</span></div>
+    <small>20일선 기울기 기준: 5거래일간 ±0.2% 이상. 색상은 관찰용 분류이며 상승 확률이나 매매 지시가 아닙니다. 종목 카드의 '판정 근거 보기'로 확인할 수 있어요.</small>
+  </section>
   <section class="filters" aria-label="검색 조건">
     <div class="full searchblock"><label for="query">종목 검색 (이름 또는 코드)</label>
       <div class="searchrow"><input id="query" type="search" placeholder="예: 삼성전자, 005930" autocomplete="off" enterkeyhint="search"><button id="findstock" type="button">검색</button></div>
@@ -123,6 +149,7 @@
     <label>관찰 조건<select id="viewmode"><option value="all">전체 (기존 필터)</option><option value="watch">관찰 후보만 · 추격 급등 제외</option></select></label>
     <label>시장<select id="market"><option value="ALL">코스피 + 코스닥</option><option value="KOSPI">코스피</option><option value="KOSDAQ">코스닥</option></select></label>
     <label>이동평균 조건<select id="mafilter"><option value="all">전체 (제한 없음)</option><option value="aligned">정배열 (5일 &gt; 20일 &gt; 200일)</option><option value="golden">오늘 5·20일 골든크로스</option><option value="both">정배열 + 오늘 골든크로스</option></select></label>
+    <label>추세 색상별 보기<select id="trendfilter"><option value="all">🎨 전체 추세</option><option value="strong_up">🟢 강한 상승</option><option value="rising">🔵 상승 시도</option><option value="sideways">🟡 횡보·혼조</option><option value="falling">🟠 하락 경계</option><option value="strong_down">🔴 강한 하락</option><option value="unavailable">⚪ 자료 미갱신</option></select></label>
     <label>최소 점수<select id="minscore"><option value="0">0점 이상</option><option value="40" selected>40점 이상</option><option value="60">60점 이상</option><option value="80">80점 이상</option></select></label>
     <label>최소 거래대금<select id="minvalue"><option value="0">제한 없음</option><option value="30">30억 원</option><option value="50" selected>50억 원</option><option value="100">100억 원</option><option value="300">300억 원</option></select></label>
     <label>등락 조건<select id="change"><option value="up" selected>상승 종목만</option><option value="all">전체</option></select></label>
@@ -132,7 +159,7 @@
   <div class="titlebar"><h2>조건 검색 결과</h2><small id="counter">0개</small></div>
   <section id="results" aria-label="종목 검색 결과"></section>
   <div class="pager"><button id="more" type="button" hidden>20개 더 보기</button></div>
-  <p class="rules">점수 기준: 종가&gt;5일 평균선 +25점, 5일선&gt;20일선 +25점, 거래량&gt;이전 20거래일 평균의 1.5배 +20점, 당일 고저가 대비 종가 위치≥75% +20점, 당일 등락률 양수 +10점. 최대 100점. <b>거래대금은 KRX에서 제공한 실제 누적 거래대금</b>을 사용합니다. 거래정지·신규 상장 등 최근 55거래일 자료가 불완전한 종목은 점수 계산에서 제외합니다. 200일선은 종가가 200거래일 연속 확보된 종목만 표시하며 부족하면 ‘자료 부족’으로 나타납니다. <b>정배열: 5일선 &gt; 20일선 &gt; 200일선, 오늘 골든크로스: 전 거래일 5일선 ≤ 20일선이면서 당일 5일선 &gt; 20일선.</b> 거래일별 종가를 이용한 판정이며 필터 적용은 기존 점수 계산 기준을 변경하지 않습니다. 우선주·스팩 등도 포함될 수 있습니다. 과거 결과의 다음날 종가 변화는 참고용 관찰값일 뿐 투자 수익이나 미래 성과를 보장하지 않습니다. 외국인·기관·프로그램 매매 분석 및 14:30 장중 실시간 검색은 제공하지 않습니다. FinanceData/marcap 원본은 갱신이 늦어질 수 있습니다. 화면의 <b>기준일과 기대 거래일</b>을 반드시 확인하세요. 최신 시세가 없을 때 표시되는 종목은 과거 기록입니다.</p>
+  <p class="rules">점수 기준: 종가&gt;5일 평균선 +25점, 5일선&gt;20일선 +25점, 거래량&gt;이전 20거래일 평균의 1.5배 +20점, 당일 고저가 대비 종가 위치≥75% +20점, 당일 등락률 양수 +10점. 최대 100점. <b>거래대금은 KRX에서 제공한 실제 누적 거래대금</b>을 사용합니다. 거래정지·신규 상장 등 최근 55거래일 자료가 불완전한 종목은 점수 계산에서 제외합니다. 200일선은 200거래일, 200일선 기울기는 205거래일의 종가가 확보되어야 표시됩니다. 부족하면 ‘자료 부족’으로 나타납니다. <b>정배열: 5일선 &gt; 20일선 &gt; 200일선, 오늘 골든크로스: 전 거래일 5일선 ≤ 20일선이면서 당일 5일선 &gt; 20일선.</b> 색상별 추세 판정은 20·200일선의 5거래일 변화와 이평 배치를 이용한 규칙 분류입니다. 기간 및 변화율 기준에 따라 결과는 달라질 수 있으며 강한 상승/하락, 상승 시도/하락 경계 모두 예측이나 매매 신호가 아닙니다. 거래일별 종가를 이용한 판정이며 필터 적용은 기존 점수 계산 기준을 변경하지 않습니다. 우선주·스팩 등도 포함될 수 있습니다. 과거 결과의 다음날 종가 변화는 참고용 관찰값일 뿐 투자 수익이나 미래 성과를 보장하지 않습니다. 외국인·기관·프로그램 매매 분석 및 14:30 장중 실시간 검색은 제공하지 않습니다. FinanceData/marcap 원본은 갱신이 늦어질 수 있습니다. 화면의 <b>기준일과 기대 거래일</b>을 반드시 확인하세요. 최신 시세가 없을 때 표시되는 종목은 과거 기록입니다.</p>
   </section>
 </main>
 <script>
@@ -141,6 +168,11 @@ const $ = id => document.getElementById(id);
 const fmt = n => Number(n).toLocaleString('ko-KR');
 const formatMa = v => (v===null || v===undefined || v==='' || !Number.isFinite(Number(v))) ? '자료 부족' : `${fmt(Math.round(Number(v)))}원`;
 const text = (el, s) => {el.textContent = String(s??'');return el;};
+const TREND_LABELS={strong_up:'🟢 강한 상승',rising:'🔵 상승 시도',sideways:'🟡 횡보·혼조',falling:'🟠 하락 경계',strong_down:'🔴 강한 하락',unavailable:'⚪ 자료 미갱신'};
+const trendKind = x => Object.prototype.hasOwnProperty.call(TREND_LABELS,x?.trend)?x.trend:'unavailable';
+const trendName = x => TREND_LABELS[trendKind(x)];
+const trendSlope = v => (v===null || v===undefined || !Number.isFinite(Number(v)))?'자료 부족':`${Number(v)>0?'+':''}${Number(v).toFixed(2)}%`;
+const trendChip = x => elem('span','trendbadge '+trendKind(x),trendName(x));
 const elem = (tag,cls,value) => {const a=document.createElement(tag);if(cls)a.className=cls;if(value!==undefined)text(a,value);return a;};
 let dataRows = [], countShown = 20, infoDate = '';
 function displayBacktest(bt){
@@ -166,7 +198,7 @@ function display(){
   const searching=query.length>0;
   const market=$('market').value;
   const minscore=Number($('minscore').value), minvalue=Number($('minvalue').value), minpos=Number($('position').value);
-  const up=$('change').value === 'up', order=$('sort').value, watchOnly=$('viewmode').value==='watch', mafilter=$('mafilter').value;
+  const up=$('change').value === 'up', order=$('sort').value, watchOnly=$('viewmode').value==='watch', mafilter=$('mafilter').value, trendfilter=$('trendfilter').value;
   const candidates=dataRows.filter(x=>{
     if(searching){
       // 검색어를 입력하면 다른 조건(시장, 점수, 거래대금, 상승/하락, 종가위치 등)을 무시
@@ -176,7 +208,7 @@ function display(){
       (mafilter==='aligned' && x.ma_aligned===true) ||
       (mafilter==='golden' && x.golden_cross===true) ||
       (mafilter==='both' && x.ma_aligned===true && x.golden_cross===true);
-    return maMatch && (market === 'ALL' || x.market === market) && (!watchOnly || x.watch === true) &&
+    return maMatch && (trendfilter==='all' || trendKind(x)===trendfilter) && (market === 'ALL' || x.market === market) && (!watchOnly || x.watch === true) &&
       Number(x.score)>=minscore && Number(x.value_eok)>=minvalue &&
       Number(x.close_position)>=minpos && (!up || Number(x.change)>0);
   });
@@ -214,6 +246,7 @@ function display(){
     if(x.watch)title.append(elem('span','pill','관찰조건 충족'));
     if(x.ma_aligned===true)title.append(elem('span','pill','이평 정배열'));
     if(x.golden_cross===true)title.append(elem('span','goldenpill','오늘 골든크로스'));
+    title.append(trendChip(x));
     left.append(title,elem('div','muted',`기준일 ${x.date || infoDate}`));
     top.append(left,elem('div','score',`${x.score}점`));
     const detail=elem('div','details');
@@ -221,7 +254,11 @@ function display(){
       `거래대금 ${fmt(x.value_eok)}억 원`,`거래량 ${x.volume_ratio}배`,
       `종가 위치 ${x.close_position}%`,
       `5일선 ${formatMa(x.ma5)}`,`20일선 ${formatMa(x.ma20)}`,`200일선 ${formatMa(x.ma200)}` ].forEach(s=>detail.append(elem('div','',s)));
-    card.append(top,detail);frag.append(card);
+    const slopeLine=elem('div','trend-inline',`20일선 기울기(5거래일) ${trendSlope(x.ma20_slope_5d_pct)} · 200일선 ${trendSlope(x.ma200_slope_5d_pct)}`);
+    const why=elem('details','trend-explain');why.append(elem('summary','','📌 추세 판정 근거 보기'));
+    why.append(elem('p','',x.trend_reason||'아직 일봉 추세 판정 데이터가 없습니다. 다음 자동 분석 실행 후 확인하세요.'));
+    why.append(elem('p','',`이평선: 5일 ${formatMa(x.ma5)} · 20일 ${formatMa(x.ma20)} · 200일 ${formatMa(x.ma200)} / 골든크로스: ${x.golden_cross===true?'발생':'해당 없음'} / 데드크로스: ${x.dead_cross===true?'발생':'해당 없음'}`));
+    card.append(top,slopeLine,detail,why);frag.append(card);
   }
   out.append(frag);$('more').hidden=countShown>=candidates.length;
 }
@@ -232,7 +269,7 @@ async function load(){
     if(!r.ok)throw Error('results.json HTTP '+r.status);
     const d=await r.json();
     if(!Array.isArray(d.rows))throw Error('데이터 형식이 올바르지 않습니다.');
-    dataRows=d.rows;infoDate=d.asof||'-';countShown=20;displayBacktest(d.backtest);
+    dataRows=d.rows;infoDate=d.asof||'-';countShown=20;displayBacktest(d.backtest);v6Render();
     const expected=d.expected_asof||'-';
     const lag=Number(d.lag_sessions||0);
     const stale=d.data_status==='delayed' || (expected!=='-' && infoDate<expected);
@@ -241,12 +278,13 @@ async function load(){
       text(banner,`⚠️ 최신 거래일 데이터 지연! 기대 거래일 ${expected}, 확보된 데이터 ${infoDate} (${lag}거래일 지연). 이 목록은 과거 종목 분석입니다. 오늘 장 마감 매수 판단에 사용하지 마세요.`);
     }
     const signalsReady=d.rows.some(x=>typeof x.ma_aligned==='boolean' && typeof x.golden_cross==='boolean');
-    const note=(d.minor_version==='5.0'?'':' ⚠️ v5 데이터가 아닙니다. 자동 분석을 다시 실행하세요.')+(signalsReady?'':' ⚠️ 정배열·골든크로스 데이터가 아직 없습니다. 새 scanner.py로 분석을 다시 실행해 주세요.');
+    const trendReady=d.rows.some(x=>Object.prototype.hasOwnProperty.call(TREND_LABELS,x.trend) && x.trend!=='unavailable');
+    const note=(d.minor_version==='5.0'?'':' ⚠️ v5 데이터가 아닙니다. 자동 분석을 다시 실행하세요.')+(signalsReady?'':' ⚠️ 정배열·골든크로스 데이터가 아직 없습니다. 새 scanner.py로 분석을 다시 실행해 주세요.')+(trendReady?'':' ⚠️ 추세 색상은 아직 계산되지 않았습니다. v6.4 scanner.py로 분석을 다시 실행해 주세요.');
     text($('status'),`데이터 기준일 ${infoDate} · 기대 거래일 ${expected} · 갱신 작업 ${d.updated||'-'} · 전체 ${fmt(d.universe_size||0)}종목 / 분석 유효 ${fmt(d.analyzed_count||0)}종목${note}`);
   }catch(e){displayBacktest(null);dataRows=[];$('freshness').hidden=false;text($('freshness'),'⚠️ 분석 결과를 읽지 못했습니다. GitHub Actions 실행 상태를 확인하세요.');text($('status'),'⚠️ 분석 데이터를 읽지 못했습니다: '+e.message);}
   finally{$('refresh').disabled=false;display();}
 }
-['query','viewmode','market','mafilter','minscore','minvalue','change','sort','position'].forEach(id=>
+['query','viewmode','market','mafilter','trendfilter','minscore','minvalue','change','sort','position'].forEach(id=>
   $(id).addEventListener(id==='query'?'input':'change',()=>{countShown=20;display();}));
 $('findstock').addEventListener('click',()=>{countShown=20;display();document.querySelector('.titlebar').scrollIntoView({behavior:'smooth',block:'start'});});
 $('query').addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();$('query').blur();$('findstock').click();}});
@@ -278,7 +316,10 @@ function v6Render(){
     const card=v6El('article','v6-card');const head=v6El('div','v6-card-top');
     head.append(v6El('strong','',`${x.name} (${x.code})`),v6El('div','v6-score',x.score===null?'–':x.score+'점'));
     card.append(head,v6El('div','v6-tag'+(x.caution?' v6-risk':''),x.caution||'점수 관찰 대상'));
-    card.append(v6El('p','v6-inline','분석 스냅샷 · 시세값 비공개 · 투자 추천 아님'));
+    const dayRow=dataRows.find(d=>d.code===x.code);
+    const trendDiv=v6El('div','trend-inline','확정 일봉 추세 (장중 판정 아님): ');
+    trendDiv.append(trendChip(dayRow||{}));card.append(trendDiv);
+    card.append(v6El('p','v6-inline','장중 점수와 일봉 추세의 기준일이 다를 수 있음 · 시세값 비공개 · 투자 추천 아님'));
     parent.append(card);
   }
 }
