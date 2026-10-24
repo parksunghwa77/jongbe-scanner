@@ -1,2 +1,2 @@
-yfinance>=0.2.60,<2
+pykrx==1.2.9
 pandas>=2.2,<3

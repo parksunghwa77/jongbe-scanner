@@ -1,82 +1,116 @@
 <!doctype html>
 <html lang="ko">
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="theme-color" content="#101827">
-  <title>종베 스캐너 v3</title>
+  <title>종베 스캐너 v4 | 코스피·코스닥 전종목</title>
   <style>
-    :root {color-scheme:dark} * {box-sizing:border-box}
-    body {margin:0;background:#101827;color:#f2f6ff;font-family:system-ui,-apple-system,sans-serif}
-    main {max-width:720px;margin:auto;padding:24px 18px 55px}
-    h1 {font-size:29px;margin:18px 0} p {line-height:1.65;color:#b9c7db}
-    .badge {background:#453216;color:#ffde9a;border-radius:10px;padding:9px 12px;display:inline-block;font-weight:650;font-size:14px}
-    .card {background:#1b2940;border:1px solid #344866;border-radius:14px;padding:16px;margin:12px 0}
-    .row {display:flex;justify-content:space-between;gap:10px;align-items:center}
-    .score {color:#83edbb;font-size:23px;font-weight:750;white-space:nowrap}
-    .label {font-size:12px;color:#96aed0;margin-bottom:6px}
-    small {color:#a9bed9;line-height:1.65}
-    button {background:#5f8ef9;color:#fff;border:0;border-radius:12px;padding:13px 18px;font-size:16px;font-weight:bold;cursor:pointer}
-    button:disabled {opacity:.6}
-    .meta {background:#172237;border-radius:12px;padding:13px 15px;margin-top:16px;color:#b9c7db}
-    .warning {color:#ffdc9e} .good {color:#8feac6} .notice {font-size:13px;margin-top:20px}
-    .title {font-size:17px;font-weight:700}
-    .filter {display:flex;justify-content:space-between;align-items:center;margin-top:22px;gap:12px}
+    :root{color-scheme:dark}*{box-sizing:border-box}
+    body{margin:0;background:#101827;color:#f3f6fe;font-family:system-ui,-apple-system,"Noto Sans KR",sans-serif}
+    main{max-width:800px;margin:auto;padding:20px 16px 48px}
+    h1{font-size:29px;margin:20px 0 12px}h2{font-size:18px;margin:0}
+    p{color:#b9c7db;line-height:1.65}small{color:#a6b8d0;line-height:1.6}
+    button,select,input{font:inherit}
+    button{background:#618dff;border:none;border-radius:11px;color:white;padding:11px 17px;cursor:pointer;font-weight:700}
+    button:disabled{opacity:.6}
+    select,input{background:#1c2940;color:#f4f6fd;border:1px solid #405471;border-radius:9px;padding:10px 11px;min-width:0;width:100%}
+    label{display:flex;gap:7px;flex-direction:column;color:#bed0e7;font-size:13px;font-weight:600}
+    .badge{display:inline-block;background:#443316;color:#ffe0a1;border-radius:9px;padding:9px 12px;font-weight:700;font-size:14px}
+    .meta{margin:17px 0;background:#1b2940;border:1px solid #344866;border-radius:12px;padding:14px;color:#cedaeb;line-height:1.6}
+    .bar{display:flex;align-items:center;gap:11px;flex-wrap:wrap;margin:15px 0}
+    .filters{border:1px solid #2c3c55;background:#151f32;border-radius:13px;padding:14px;margin:12px 0 22px;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:13px}
+    .full{grid-column:1/-1}.titlebar{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:20px 0 12px}
+    .card{border:1px solid #344866;background:#1b2940;border-radius:15px;padding:17px;margin-bottom:12px}
+    .cardtop{display:flex;align-items:flex-start;justify-content:space-between;gap:10px}
+    .name{font-size:17px;font-weight:750;overflow-wrap:anywhere}
+    .score{font-size:24px;font-weight:800;color:#83edbb;white-space:nowrap}
+    .muted{font-size:13px;color:#a7bbd8}.details{display:grid;grid-template-columns:1fr 1fr;gap:6px 12px;margin-top:12px;color:#cad7e8;font-size:13px}
+    .rules{margin-top:24px;padding:13px 15px;background:#172237;border-radius:12px;font-size:12px;color:#b2c4df;line-height:1.75}
+    .error{color:#ffbcae}.stale{color:#ffdf98}.pill{font-size:11px;background:#314869;color:#d2e7ff;border-radius:6px;padding:3px 6px;margin-left:6px}
+    .pager{display:flex;justify-content:center;margin:15px 0}.empty{padding:20px 6px}
+    @media(min-width:620px){.filters{grid-template-columns:repeat(4,minmax(0,1fr))}.full{grid-column:span 2}}
   </style>
 </head>
 <body><main>
-  <h1>📈 종베 스캐너 <small>v3</small></h1>
-  <div class="badge">⚠️ 장 마감 후 일봉 분석 · 실시간 아님</div>
-  <p>코스피·코스닥 <strong>15개 시범 종목</strong>을 무료 일봉으로 분석하고 점수순 상위 10개를 보여줍니다. 평일 16:45(KST) 예약 실행을 시도하며 지연·실패할 수 있습니다.</p>
-  <button id="refresh" type="button">결과 새로고침</button>
-  <div class="meta" id="status" aria-live="polite">데이터 확인 중...</div>
-  <div class="filter"><strong>조건 점수 순위</strong><small>최대 10개 · 투자 추천 아님</small></div>
-  <section id="results"></section>
-  <p class="notice"><small>점수 기준: 종가&gt;5일선 25점, 5일선&gt;20일선 25점, 거래량이 최근 20거래일 평균의 1.5배 이상 20점, 당일 고저가 범위에서 종가 위치 75% 이상 20점, 전일 대비 상승 10점. 거래대금은 실제 체결 거래대금이 아닌 종가×거래량 근사치. 표시된 목표(+3%)·손절(-2%)은 계산 예시이며 권장 가격이 아닙니다. 무료 데이터는 지연·누락될 수 있습니다.</small></p>
+  <h1>📈 종베 스캐너 <small>v4</small></h1>
+  <div class="badge">⚠️ 장 마감 후 확정 일봉 · 실시간 아님</div>
+  <p>코스피·코스닥 전체 주식 종목의 일봉을 검토하고 기술 조건을 점수화합니다. <b>점수는 상승 확률이나 매수 추천이 아닙니다.</b></p>
+  <div class="bar"><button id="refresh" type="button">결과 새로고침</button><small>평일 16:45(KST) 자동 실행 예약 · 지연/실패 가능</small></div>
+  <div class="meta" id="status" role="status" aria-live="polite">분석 데이터 확인 중...</div>
+  <section class="filters" aria-label="검색 조건">
+    <label class="full">종목 검색 (이름 또는 코드)<input id="query" type="search" placeholder="예: 삼성전자, 005930" autocomplete="off"></label>
+    <label>시장<select id="market"><option value="ALL">코스피 + 코스닥</option><option value="KOSPI">코스피</option><option value="KOSDAQ">코스닥</option></select></label>
+    <label>최소 점수<select id="minscore"><option value="0">0점 이상</option><option value="40" selected>40점 이상</option><option value="60">60점 이상</option><option value="80">80점 이상</option></select></label>
+    <label>최소 거래대금<select id="minvalue"><option value="0">제한 없음</option><option value="30">30억 원</option><option value="50" selected>50억 원</option><option value="100">100억 원</option><option value="300">300억 원</option></select></label>
+    <label>등락 조건<select id="change"><option value="up" selected>상승 종목만</option><option value="all">전체</option></select></label>
+    <label>정렬<select id="sort"><option value="score">조건 점수순</option><option value="value">거래대금순</option><option value="volume">거래량 증가순</option><option value="change">당일 상승률순</option></select></label>
+    <label>종가 위치<select id="position"><option value="0">제한 없음</option><option value="60" selected>60% 이상</option><option value="75">75% 이상</option><option value="90">90% 이상</option></select></label>
+  </section>
+  <div class="titlebar"><h2>조건 검색 결과</h2><small id="counter">0개</small></div>
+  <section id="results" aria-label="종목 검색 결과"></section>
+  <div class="pager"><button id="more" type="button" hidden>20개 더 보기</button></div>
+  <p class="rules">점수 기준: 종가&gt;5일 평균선 +25점, 5일선&gt;20일선 +25점, 거래량&gt;이전 20거래일 평균의 1.5배 +20점, 당일 고저가 대비 종가 위치≥75% +20점, 당일 등락률 양수 +10점. 최대 100점. <b>거래대금은 KRX에서 제공한 실제 누적 거래대금</b>을 사용합니다. 거래정지·신규 상장 등 21거래일 자료가 불완전한 종목은 점수 계산에서 제외합니다. 우선주·스팩 등도 포함될 수 있습니다. 외국인·기관·프로그램 매매 분석 및 14:30 장중 실시간 검색은 제공하지 않습니다. KRX 무료 조회가 차단/변경되면 자동 실행이 실패할 수 있으며 이전 정상 배포가 남을 수 있으므로 기준일을 확인하세요.</p>
 </main>
 <script>
-  const resultEl = document.getElementById('results');
-  const statusEl = document.getElementById('status');
-  const refreshEl = document.getElementById('refresh');
-  const won = n => Number(n).toLocaleString('ko-KR') + '원';
-  const txt = (el, value) => {el.textContent = String(value ?? ''); return el;};
-  const el = (tag, className, value) => {const x=document.createElement(tag);if(className)x.className=className;if(value!==undefined)txt(x,value);return x;};
-  async function load() {
-    refreshEl.disabled=true;
-    txt(statusEl,'데이터 확인 중...');
-    resultEl.replaceChildren();
-    try {
-      const response = await fetch('./results.json?v='+Date.now(), {cache:'no-store'});
-      if (!response.ok) throw new Error('results.json 파일을 읽지 못했습니다 (HTTP '+response.status+')');
-      const data=await response.json();
-      if (!Array.isArray(data.rows)) throw new Error('분석 데이터 형식이 올바르지 않습니다.');
-      let stale='';
-      if (data.asof) {
-        // 데이터 기준일은 YYYY-MM-DD 문자열. 브라우저 시간대에 흔들리지 않도록 KST 정오 사용
-        const age = Math.floor((Date.now()-new Date(data.asof+'T12:00:00+09:00').getTime())/86400000);
-        if (age >= 4) stale=' ⚠️ 기준일이 '+age+'일 전입니다. 최신 데이터인지 확인하세요.';
-      }
-      txt(statusEl, '기준일: '+(data.asof||'없음')+' · 갱신: '+(data.updated||'알 수 없음')+' · 분석 성공 '+(data.analyzed_count??data.rows.length)+'/'+(data.universe_size??'?')+'종목'+stale);
-      if(!data.rows.length) {
-        resultEl.append(el('p','warning','아직 분석 결과가 없습니다. GitHub Actions → Jongbe daily scan and publish → Run workflow를 실행하세요.'));
-        return;
-      }
-      for (const x of data.rows) {
-        const card=el('article','card');
-        const top=el('div','row');
-        top.append(el('div','title',x.name+' ('+x.code+')'),el('span','score',x.score+'점'));
-        const info=el('p','', '기준일 '+(x.date||data.asof||'-')+' · 종가 '+won(x.price)+' · 전일 대비 '+x.change+'%');
-        const details=el('small','', '거래대금 추정 '+x.value_eok+'억원 · 거래량 배수 '+x.volume_ratio+'배 · 종가 위치 '+x.close_position+'%');
-        card.append(top,info,details);
-        resultEl.append(card);
-      }
-      if (data.errors?.length) resultEl.append(el('p','warning','일부 종목 조회 실패: '+data.errors.length+'개 (오류 상세는 Actions 실행 기록 참조)'));
-    } catch(error) {
-      txt(statusEl, '데이터를 읽지 못했습니다: '+error.message);
-      resultEl.append(el('p','warning','자동 실행과 사이트 배포가 완료됐는지 GitHub Actions를 확인하세요.'));
-    } finally {refreshEl.disabled=false;}
+'use strict';
+const $ = id => document.getElementById(id);
+const fmt = n => Number(n).toLocaleString('ko-KR');
+const text = (el, s) => {el.textContent = String(s??'');return el;};
+const elem = (tag,cls,value) => {const a=document.createElement(tag);if(cls)a.className=cls;if(value!==undefined)text(a,value);return a;};
+let dataRows = [], countShown = 20, infoDate = '';
+function display(){
+  const query=$('query').value.trim().toLowerCase();
+  const market=$('market').value;
+  const minscore=Number($('minscore').value), minvalue=Number($('minvalue').value), minpos=Number($('position').value);
+  const up=$('change').value === 'up', order=$('sort').value;
+  const candidates=dataRows.filter(x=>
+    (!query || String(x.name||'').toLowerCase().includes(query) || String(x.code||'').includes(query)) &&
+    (market === 'ALL' || x.market === market) && Number(x.score)>=minscore &&
+    Number(x.value_eok)>=minvalue && Number(x.close_position)>=minpos && (!up || Number(x.change)>0)
+  );
+  if(order==='value') candidates.sort((a,b)=>b.value_eok-a.value_eok||b.score-a.score);
+  if(order==='volume') candidates.sort((a,b)=>b.volume_ratio-a.volume_ratio||b.score-a.score);
+  if(order==='change') candidates.sort((a,b)=>b.change-a.change||b.score-a.score);
+  if(order==='score') candidates.sort((a,b)=>b.score-a.score||b.value_eok-a.value_eok);
+  text($('counter'),`검색 ${fmt(candidates.length)}개 · ${fmt(Math.min(countShown,candidates.length))}개 표시`);
+  const out=$('results');out.replaceChildren();
+  if(!dataRows.length){out.append(elem('p','empty','분석 결과가 없습니다. Actions 수집 성공 여부를 확인하세요.'));$('more').hidden=true;return;}
+  if(!candidates.length){out.append(elem('p','empty','현재 검색 조건에 맞는 종목이 없습니다. 필터를 완화해 보세요.'));$('more').hidden=true;return;}
+  const frag=document.createDocumentFragment();
+  for(const x of candidates.slice(0,countShown)){
+    const card=elem('article','card');
+    const top=elem('div','cardtop');const left=elem('div');
+    const title=elem('div','name',`${x.name} (${x.code})`);
+    title.append(elem('span','pill',x.market==='KOSPI'?'코스피':'코스닥'));
+    left.append(title,elem('div','muted',`기준일 ${x.date || infoDate}`));
+    top.append(left,elem('div','score',`${x.score}점`));
+    const detail=elem('div','details');
+    [ `종가 ${fmt(x.price)}원`,`전일 대비 ${Number(x.change)>0?'+':''}${x.change}%`,
+      `거래대금 ${fmt(x.value_eok)}억 원`,`거래량 ${x.volume_ratio}배`,
+      `종가 위치 ${x.close_position}%`,`5일선 ${fmt(x.ma5)}원` ].forEach(s=>detail.append(elem('div','',s)));
+    card.append(top,detail);frag.append(card);
   }
-  refreshEl.addEventListener('click',load);
-  load();
+  out.append(frag);$('more').hidden=countShown>=candidates.length;
+}
+async function load(){
+  $('refresh').disabled=true;text($('status'),'분석 결과 불러오는 중...');
+  try{
+    const r=await fetch('./results.json?ts='+Date.now(),{cache:'no-store'});
+    if(!r.ok)throw Error('results.json HTTP '+r.status);
+    const d=await r.json();
+    if(!Array.isArray(d.rows))throw Error('데이터 형식이 올바르지 않습니다.');
+    dataRows=d.rows;infoDate=d.asof||'-';countShown=20;
+    const date=new Date(infoDate+'T12:00:00+09:00');const age=Math.floor((Date.now()-date.getTime())/86400000);
+    const stale=Number.isFinite(age)&&age>=4?` ⚠️ 기준일 ${age}일 전 (휴장·갱신 지연 여부 확인)` : '';
+    const note=d.version===4?'': ' ⚠️ 아직 v4 결과가 아닙니다. Actions를 새로 실행하세요.';
+    text($('status'),`기준일 ${infoDate} · 갱신 ${d.updated||'-'} · 전체 ${fmt(d.universe_size||0)}종목 / 분석 유효 ${fmt(d.analyzed_count||0)}종목${stale}${note}`);
+  }catch(e){dataRows=[];text($('status'),'⚠️ 분석 데이터를 읽지 못했습니다: '+e.message);}
+  finally{$('refresh').disabled=false;display();}
+}
+['query','market','minscore','minvalue','change','sort','position'].forEach(id=>
+  $(id).addEventListener(id==='query'?'input':'change',()=>{countShown=20;display();}));
+$('more').addEventListener('click',()=>{countShown+=20;display();});
+$('refresh').addEventListener('click',load);
+load();
 </script>
 </body></html>
