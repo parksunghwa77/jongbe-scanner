@@ -12,7 +12,9 @@ GitHub에 공개된 연도별 한국 주식 마감 OHLCV 스냅샷을 내려받�
 from __future__ import annotations
 
 from io import BytesIO
+from html.parser import HTMLParser
 from pathlib import Path
+from collections import defaultdict
 import datetime as dt
 import json
 import logging
@@ -27,7 +29,8 @@ import exchange_calendars as xcals
 ROOT = Path(__file__).resolve().parent
 OUT = ROOT / 'results.json'
 KST = ZoneInfo('Asia/Seoul')
-HISTORY_DAYS = 205  # 현재 200일선과 5거래일 전 200일선까지 계산
+HISTORY_DAYS = 452  # 1년(약 252거래일) 차트 전체에 200일선을 표시할 수 있도록 200일 추가
+CHART_VISIBLE_DAYS = 252
 REQUIRED_VALID_DAYS = 55  # 기존 v5와 동일한 분석대상/점수 기준 유지
 BACKTEST_DAYS = 15
 BACKTEST_TOP_N = 10
@@ -85,8 +88,8 @@ def download_year(year: int) -> pd.DataFrame:
 
 
 def get_data(reference: dt.date) -> pd.DataFrame:
-    # 200일선의 5거래일 전 기울기까지 계산할 205거래일 확보.
-    years = [reference.year, reference.year - 1]
+    # 1년 차트의 첫날에도 200일선을 계산할 수 있도록 충분한 거래일 확보.
+    years = [reference.year, reference.year - 1, reference.year - 2]
     frames = [download_year(y) for y in years]
     df = pd.concat(frames, ignore_index=True)
     columns = {'Date','Code','Name','Market','Open','High','Low','Close','Volume','Amount'}
@@ -103,18 +106,18 @@ def get_data(reference: dt.date) -> pd.DataFrame:
     df = df.drop_duplicates(subset=['Date', 'Code'], keep='last')
     for col in ('Open','High','Low','Close','Volume','Amount'):
         df[col] = pd.to_numeric(df[col], errors='coerce')
+    for col in ('Stocks','Marcap'):
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors='coerce')
     latest = df['Date'].max().date()
     if (reference - latest).days > MAX_STALE_CALENDAR_DAYS:
         raise RuntimeError(f'시세 원본이 오래됨: 원본 최신 {latest}, 분석 목표일 {reference}. 이전 배포 유지.')
-    dates = sorted(df['Date'].drop_duplicates().tolist(), reverse=True)
-    good_dates = []
-    for day in dates:
-        today_df = df[df['Date'] == day]
-        market_counts = today_df.groupby('Market')['Code'].count().to_dict()
-        if all(market_counts.get(m, 0) >= mincount for m, mincount in MARKET_MIN.items()):
-            good_dates.append(day)
-        if len(good_dates) >= HISTORY_DAYS:
-            break
+    # 날짜별 시장 종목 수는 단 한 번 집계한다. 452일 차트 확장 시 느린 반복 필터 방지.
+    by_day = df.groupby(['Date','Market'], observed=True)['Code'].count().unstack(fill_value=0)
+    healthy = pd.Series(True, index=by_day.index)
+    for market, threshold in MARKET_MIN.items():
+        healthy &= by_day.get(market, pd.Series(0, index=by_day.index)) >= threshold
+    good_dates = sorted(by_day.index[healthy].tolist(), reverse=True)[:HISTORY_DAYS]
     if len(good_dates) < HISTORY_DAYS:
         raise RuntimeError(f'전체 시장 데이터 {HISTORY_DAYS}일 필요, 정상 거래일 {len(good_dates)}일만 확보. 이전 배포 유지.')
     filtered = df[df['Date'].isin(good_dates)]
@@ -305,6 +308,141 @@ def historical_forward_check(history):
     }
 
 
+
+class _KindListingParser(HTMLParser):
+    """KIND 상장법인 목록의 표 셀들을 HTML 표준 파서로 읽는다."""
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.rows=[];self.row=None;self.cell=None
+    def handle_starttag(self, tag, attrs):
+        if tag=='tr': self.row=[]
+        elif tag in ('td','th') and self.row is not None: self.cell=[]
+    def handle_data(self, data):
+        if self.cell is not None: self.cell.append(data)
+    def handle_endtag(self, tag):
+        if tag in ('td','th') and self.row is not None and self.cell is not None:
+            self.row.append(' '.join(''.join(self.cell).split())); self.cell=None
+        elif tag=='tr' and self.row is not None:
+            if self.row: self.rows.append(self.row)
+            self.row=None;self.cell=None
+
+
+def fetch_company_profiles() -> dict:
+    """KIND 상장법인 목록의 공개 기업정보를 선택적으로 가져온다.
+
+    접속 실패/형식 변경 때는 빈 사전을 반환하고 종가 분석과 차트 배포는 계속한다.
+    """
+    url='https://kind.krx.co.kr/corpgeneral/corpList.do'
+    try:
+        response=requests.get(url,params={'method':'download','searchType':'13'},
+                              timeout=(5,12),headers={'User-Agent':'Mozilla/5.0 (compatible; JongbeStockInfo/1.0)'})
+        response.raise_for_status()
+        if len(response.content)>20_000_000 or not response.content:
+            raise ValueError('KIND 응답 크기 오류')
+        for charset in ('euc-kr','utf-8'):
+            try: decoded=response.content.decode(charset)
+            except UnicodeDecodeError: continue
+            parser=_KindListingParser();parser.feed(decoded)
+            header=None;body=[]
+            for row in parser.rows:
+                if '회사명' in row and '종목코드' in row:
+                    header=row;body=[]
+                elif header is not None and len(row)>=len(header):
+                    body.append(row)
+            if not header: continue
+            index={name:header.index(name) for name in ('회사명','종목코드','업종','주요제품','대표자명','상장일','홈페이지','지역') if name in header}
+            out={}
+            for row in body:
+                code=''.join(ch for ch in row[index['종목코드']] if ch.isdigit()).zfill(6)
+                if len(code)!=6: continue
+                def field(key): return row[index[key]].strip()[:180] if key in index else ''
+                out[code]={'sector':field('업종'),'products':field('주요제품'),
+                           'ceo':field('대표자명'),'listed_date':field('상장일'),
+                           'website':field('홈페이지'),'region':field('지역')}
+            if len(out)>=500:
+                log.info('KIND 상장법인 기본정보 %s개 확보',len(out))
+                return out
+        raise ValueError('KIND 기업정보 표 형식 또는 인코딩 불일치')
+    except Exception as exc:
+        log.warning('KIND 업종/대표/제품 정보 미수집 (시세 및 차트에는 영향 없음): %s',exc)
+        return {}
+
+
+def export_charts(df: pd.DataFrame, result: dict) -> tuple[int, int]:
+    """공개 확정 일봉의 차트 데이터를 접두어별 묶음 JSON으로 생성.
+
+    시가/고가/저가/종가/거래량·평균선만 게시. NH API 관련 정보는 절대 포함하지 않음.
+    이동평균은 거래소 거래일에 맞춰 연속으로 자료가 있을 때만 생성한다.
+    """
+    allowed = {r['code'] for r in result['rows']}
+    calendar = pd.DatetimeIndex(sorted(df['Date'].unique()))
+    if len(calendar) < HISTORY_DAYS:
+        raise RuntimeError('차트용 거래일이 부족합니다.')
+    chart_dir = ROOT / 'charts'
+    chart_dir.mkdir(parents=True, exist_ok=True)
+    # 매 실행 시 기존 생성 파일을 지우므로 게시할 종목과 JSON 사이에 불일치가 남지 않음.
+    for old in chart_dir.glob('*.json'):
+        old.unlink()
+    chunks = defaultdict(dict)
+    profile_chunks = defaultdict(dict)
+    kind_profiles=fetch_company_profiles()
+    count = 0
+    for code, group in df[df['Code'].isin(allowed)].groupby('Code', sort=True):
+        group = group.sort_values('Date').drop_duplicates('Date', keep='last')
+        series = group.set_index('Date').reindex(calendar)
+        close = series['Close'].where(series['Close'] > 0)
+        avg5 = close.rolling(window=5, min_periods=5).mean()
+        avg20 = close.rolling(window=20, min_periods=20).mean()
+        avg200 = close.rolling(window=200, min_periods=200).mean()
+        # 발생 시점의 전 거래일과 현재의 두 값을 사용하여 신호를 계산.
+        golden = (avg5.shift(1) <= avg20.shift(1)) & (avg5 > avg20)
+        dead = (avg5.shift(1) >= avg20.shift(1)) & (avg5 < avg20)
+        broke20 = (close.shift(1) <= avg20.shift(1)) & (close > avg20)
+        broke200 = (close.shift(1) <= avg200.shift(1)) & (close > avg200)
+        lines = []
+        for i in range(max(0, len(calendar)-CHART_VISIBLE_DAYS), len(calendar)):
+            row = series.iloc[i]
+            o,h,l,c,v = (row.get(k) for k in ('Open','High','Low','Close','Volume'))
+            if not all(pd.notna(x) for x in (o,h,l,c,v)) or c<=0 or l<=0 or h<l or o<=0 or v<0:
+                continue
+            markers = int(bool(golden.iloc[i])) + int(bool(dead.iloc[i]))*2 + int(bool(broke20.iloc[i]))*4 + int(bool(broke200.iloc[i]))*8
+            def mean_or_none(vals):
+                val = vals.iloc[i]
+                return round(float(val),2) if pd.notna(val) else None
+            lines.append([calendar[i].strftime('%Y-%m-%d'),int(o),int(h),int(l),int(c),int(v),
+                          mean_or_none(avg5),mean_or_none(avg20),mean_or_none(avg200),markers])
+        if not lines:
+            continue
+        prefix=str(code)[:2]
+        chunks[prefix][str(code)] = lines
+        latest_row=group.iloc[-1]
+        shares=latest_row.get('Stocks')
+        shares=int(shares) if pd.notna(shares) and 0<float(shares)<1e11 else None
+        cap=int(lines[-1][4]*shares) if shares is not None else None
+        extra=kind_profiles.get(str(code),{})
+        profile_chunks[prefix][str(code)]={
+            'name':str(latest_row.get('Name') or ''),'market':str(latest_row.get('Market') or ''),
+            'market_cap_krw':cap,'listed_shares':shares,
+            'period_high':max(bar[2] for bar in lines[-252:]),
+            'period_low':min(bar[3] for bar in lines[-252:]),
+            'sector':extra.get('sector',''),'products':extra.get('products',''),
+            'ceo':extra.get('ceo',''),'listed_date':extra.get('listed_date',''),
+            'website':extra.get('website',''),'region':extra.get('region',''),
+            'kind_available':bool(extra),
+        }
+        count += 1
+    if count != len(allowed):
+        raise RuntimeError(f'차트 누락: 분석 {len(allowed)}종목 / 차트 {count}종목. 배포 중단.')
+    total_bytes=0
+    for prefix, stocks in chunks.items():
+        payload = {'schema':'jongbe-ohlcv-v1','asof':result['asof'],'stocks':stocks,'profiles':profile_chunks[prefix]}
+        blob = json.dumps(payload,ensure_ascii=False,separators=(',',':')).encode('utf-8')
+        total_bytes += len(blob)
+        (chart_dir / (prefix+'.json')).write_bytes(blob)
+    log.info('차트 생성 완료: %s종목 / %s파일 / %.2f MiB',count,len(chunks),total_bytes/1024**2)
+    return count,len(chunks)
+
+
 def main():
     now = dt.datetime.now(KST)
     reference=expected_trading_date(now)
@@ -325,6 +463,10 @@ def main():
     })
     if lag:
         log.warning('주의: %s (기대 거래일 %s)',result['freshness_message'],reference)
+    chart_count,chart_files=export_charts(data,result)
+    result['chart_count']=chart_count
+    result['chart_days']=CHART_VISIBLE_DAYS
+    result['chart_schema']='jongbe-ohlcv-v1'
     tmp=OUT.with_suffix('.json.tmp')
     tmp.write_text(json.dumps(result,ensure_ascii=False,separators=(',',':'))+'\n',encoding='utf-8')
     os.replace(tmp,OUT)

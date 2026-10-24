@@ -1,0 +1,52 @@
+name: Jongbe daily scan and publish
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "15 9 * * 1-5"
+    - cron: "30 0 * * 1-6"
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: jongbe-pages
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Checkout files
+        uses: actions/checkout@v4
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Analyze stocks and generate public EOD chart data
+        run: python scanner.py
+      - name: Prepare website
+        run: |
+          test -s results.json
+          test -s charts/00.json
+          mkdir -p site
+          cp index.html results.json site/
+          cp -r charts site/
+          touch site/.nojekyll
+      - name: Configure Pages
+        uses: actions/configure-pages@v5
+      - name: Upload website
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+      - name: Deploy website
+        id: deployment
+        uses: actions/deploy-pages@v4
