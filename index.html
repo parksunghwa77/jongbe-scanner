@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="theme-color" content="#f4f8ff">
-  <title>종베 스캐너 v7.3.4 · v6 검색 버튼과 확정 일봉 조회</title>
+  <title>종베 스캐너 v7.3.5 · v5 검색 초기화·500억·1000억</title>
   <style>
     :root{color-scheme:light}*{box-sizing:border-box}
     body{margin:0;background:#101827;color:#f3f6fe;font-family:system-ui,-apple-system,"Noto Sans KR",sans-serif}
@@ -57,6 +57,9 @@
     .searchrow{display:flex;gap:8px}
     .searchrow>input{flex:1;min-width:0}
     .searchrow>button{flex-shrink:0}
+    #clearstock{background:#eaf0fb;color:#294a75;border:1px solid #aabfdf;font-size:14px;padding:10px 12px}
+    #clearstock:hover,#clearstock:focus-visible{background:#dce9fd}
+    @media(max-width:370px){.searchrow{gap:6px}.searchrow>button{padding:10px 10px}}
     .searchhint{font-weight:500;color:#b4d4ff;line-height:1.55}
     .pager{display:flex;justify-content:center;margin:15px 0}.empty{padding:20px 6px}
     @media(min-width:620px){.filters{grid-template-columns:repeat(4,minmax(0,1fr))}.full{grid-column:span 2}}
@@ -266,7 +269,7 @@
   </style>
 </head>
 <body><main>
-  <h1 class="app-title">📈 종베 스캐너 <span>v7.3.4</span></h1>
+  <h1 class="app-title">📈 종베 스캐너 <span>v7.3.5</span></h1>
   <div class="status-pill">🔎 읽기 전용 · 투자 추천 아님</div>
   <nav class="switcher" aria-label="분석 화면 선택">
     <button id="tabv6" type="button" class="selected" aria-pressed="true">v6 장중 관찰</button>
@@ -419,7 +422,7 @@
   </section>
   <section class="filters" aria-label="검색 조건">
     <div class="full searchblock"><label for="query">종목 검색 (이름 또는 코드)</label>
-      <div class="searchrow"><input id="query" type="search" placeholder="예: 삼성전자, 005930" autocomplete="off" enterkeyhint="search"><button id="findstock" type="button">검색</button></div>
+      <div class="searchrow"><input id="query" type="search" placeholder="예: 삼성전자, 005930" autocomplete="off" enterkeyhint="search"><button id="findstock" type="button">검색</button><button id="clearstock" type="button" aria-label="v5 종목 검색어 초기화">초기화</button></div>
       <small id="searchhint" class="searchhint" aria-live="polite">종목명을 입력하면 점수·거래대금 등 다른 필터와 관계없이 전체 분석 종목에서 검색합니다.</small>
     </div>
     <label>관찰 조건<select id="viewmode"><option value="all">전체 (기존 필터)</option><option value="watch">관찰 후보만 · 추격 급등 제외</option></select></label>
@@ -427,7 +430,7 @@
     <label>이동평균 조건<select id="mafilter"><option value="all">전체 (제한 없음)</option><option value="aligned">정배열 (5일 &gt; 20일 &gt; 200일)</option><option value="golden">오늘 5·20일 골든크로스</option><option value="both">정배열 + 오늘 골든크로스</option></select></label>
     <label>추세 색상별 보기<select id="trendfilter"><option value="all">🎨 전체 추세</option><option value="strong_up">🟢 강한 상승</option><option value="rising">🔵 상승 시도</option><option value="sideways">🟡 횡보·혼조</option><option value="falling">🟠 하락 경계</option><option value="strong_down">🔴 강한 하락</option><option value="unavailable">⚪ 자료 미갱신</option></select></label>
     <label>최소 점수<select id="minscore"><option value="0">0점 이상</option><option value="40" selected>40점 이상</option><option value="60">60점 이상</option><option value="80">80점 이상</option></select></label>
-    <label>최소 거래대금<select id="minvalue"><option value="0">제한 없음</option><option value="30">30억 원</option><option value="50" selected>50억 원</option><option value="100">100억 원</option><option value="300">300억 원</option></select></label>
+    <label>최소 거래대금<select id="minvalue"><option value="0">제한 없음</option><option value="30">30억 원</option><option value="50" selected>50억 원</option><option value="100">100억 원</option><option value="300">300억 원</option><option value="500">500억 원</option><option value="1000">1,000억 원</option></select></label>
     <label>등락 조건<select id="change"><option value="up" selected>상승 종목만</option><option value="all">전체</option></select></label>
     <label>정렬<select id="sort"><option value="score">조건 점수순</option><option value="value">거래대금순</option><option value="volume">거래량 증가순</option><option value="change">당일 상승률순</option></select></label>
     <label>종가 위치<select id="position"><option value="0">제한 없음</option><option value="60" selected>60% 이상</option><option value="75">75% 이상</option><option value="90">90% 이상</option></select></label>
@@ -1029,7 +1032,8 @@ async function load(){
 }
 ['query','viewmode','market','mafilter','trendfilter','minscore','minvalue','change','sort','position'].forEach(id=>
   $(id).addEventListener(id==='query'?'input':'change',()=>{countShown=20;display();}));
-$('findstock').addEventListener('click',()=>{countShown=20;display();document.querySelector('.titlebar').scrollIntoView({behavior:'smooth',block:'start'});});
+$('findstock').addEventListener('click',()=>{countShown=20;display();document.querySelector('#v5panel .titlebar').scrollIntoView({behavior:'smooth',block:'start'});});
+$('clearstock').addEventListener('click',()=>{ $('query').value=''; $('query').blur(); countShown=20; display(); });
 $('query').addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();$('query').blur();$('findstock').click();}});
 $('more').addEventListener('click',()=>{countShown+=20;display();});
 $('refresh').addEventListener('click',load);
