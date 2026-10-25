@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="theme-color" content="#f4f8ff">
-  <title>종베 스캐너 v7.3.6 · v7.3 추정 거래대금 500억·1000억 추가</title>
+  <title>종베 스캐너 v7.3.7 · 일봉 차트 켜짐·꺼짐</title>
   <style>
     :root{color-scheme:light}*{box-sizing:border-box}
     body{margin:0;background:#101827;color:#f3f6fe;font-family:system-ui,-apple-system,"Noto Sans KR",sans-serif}
@@ -168,7 +168,11 @@
     .company-grid dt,.company-load{color:#577390}
     .company-grid>div{border-color:#d6e2ef}
     .chart-inline{background:#fff;border-color:#c3d6eb}
-    .chart-inline-title{color:#23466e;border-color:#d4e2f3;background:#f1f7ff}
+    .chart-inline-title{color:#23466e;border-color:#d4e2f3;background:#f1f7ff;display:flex;gap:10px;align-items:center;justify-content:space-between;flex-wrap:wrap;line-height:1.5}
+    .chart-inline-label{flex:1 1 180px;min-width:0}
+    .chart-power{cursor:pointer;border:1px solid #70be9d;border-radius:9px;background:#dbf7e9;color:#086945;font-size:14px;font-weight:800;min-height:41px;padding:9px 13px;white-space:nowrap}
+    .chart-power.off{background:#eaedf3;color:#576477;border-color:#bdc9d9}
+    .chart-power:focus-visible{outline:3px solid #2d70db;outline-offset:2px}
     .chart-scroll{background:#fff;border-color:#c7d9ec;touch-action:pan-y;overscroll-behavior-x:contain}
     .chart-caption,.chart-detail,.chart-legend{color:#49627f}
     .chart-level{background:#f1f7fe;border-color:#c3d4e8;color:#38587a}
@@ -269,7 +273,7 @@
   </style>
 </head>
 <body><main>
-  <h1 class="app-title">📈 종베 스캐너 <span>v7.3.6</span></h1>
+  <h1 class="app-title">📈 종베 스캐너 <span>v7.3.7</span></h1>
   <div class="status-pill">🔎 읽기 전용 · 투자 추천 아님</div>
   <nav class="switcher" aria-label="분석 화면 선택">
     <button id="tabv6" type="button" class="selected" aria-pressed="true">v6 장중 관찰</button>
@@ -557,8 +561,10 @@ function companyNameButton(stock){
   btn.type='button';btn.title='회사 이름을 눌러 기업 기본정보 확인 (주가 차트는 자동 표시)';
   return btn;
 }
-// 차트를 펼치지 않아도 자동 표시. 현재 보이는 카드부터 로딩하여 스마트폰 속도를 지킨다.
+// 각 종목의 일봉 차트는 기본 켜짐이며, 각 카드의 버튼으로 독립적으로 끌 수 있다.
+// 화면 가까이에 들어오면 자동 로딩하여 스마트폰의 불필요한 통신을 줄인다.
 const chartObservers={v5:[],v6:[],v7:[]};
+let chartContentSeq=0;
 function clearChartObservers(group){
   for(const observer of chartObservers[group])observer.disconnect();
   chartObservers[group]=[];
@@ -566,14 +572,24 @@ function clearChartObservers(group){
 function addChartInline(card,code,group='v5'){
   const section=elem('section','chart-inline');
   section.setAttribute('aria-label',code+' 확정 일봉 차트');
-  section.append(elem('div','chart-inline-title','📈 확정 일봉 차트 · 자동 표시 / 5·20·200일선 / 지지·저항'));
+  const header=elem('div','chart-inline-title');
+  const label=elem('span','chart-inline-label','📈 확정 일봉 차트 · 5·20·200일선 / 지지·저항');
+  const toggle=elem('button','chart-power','🟢 켜짐');
+  toggle.type='button';
+  toggle.title='눌러서 일봉 차트 끄기';
   const content=elem('div','chart-content');
+  content.id='chart-content-'+(++chartContentSeq);
+  toggle.setAttribute('aria-controls',content.id);
+  toggle.setAttribute('aria-expanded','true');
   content.append(elem('p','chart-caption','차트가 화면에 들어오면 자동 표시됩니다.'));
-  section.append(content);card.append(section);
-  let started=false;
+  header.append(label,toggle);
+  section.append(header,content);
+  card.append(section);
+  let started=false,observer=null;
   const loadChart=async()=>{
-    if(started||!section.isConnected)return;
+    if(started || !section.isConnected || content.hidden)return;
     started=true;
+    if(observer)observer.disconnect();
     content.replaceChildren(elem('p','chart-caption','확정 일봉 차트 불러오는 중…'));
     try{
       const data=await getChartSeries(code);
@@ -583,12 +599,22 @@ function addChartInline(card,code,group='v5'){
       if(section.isConnected)content.replaceChildren(elem('p','chart-error',`⚠️ ${e.message}`));
     }
   };
+  toggle.addEventListener('click',()=>{
+    const turnOn=content.hidden;
+    content.hidden=!turnOn;
+    toggle.textContent=turnOn?'🟢 켜짐':'⚪ 꺼짐';
+    toggle.classList.toggle('off',!turnOn);
+    toggle.title=turnOn?'눌러서 일봉 차트 끄기':'눌러서 일봉 차트 켜기';
+    toggle.setAttribute('aria-expanded',String(turnOn));
+    if(turnOn && !started)loadChart();
+  });
   if(typeof IntersectionObserver==='undefined'){
     setTimeout(loadChart,0);
   }else{
-    const observer=new IntersectionObserver(entries=>{
-      if(entries.some(entry=>entry.isIntersecting)){
-        observer.disconnect();loadChart();
+    observer=new IntersectionObserver(entries=>{
+      if(entries.some(entry=>entry.isIntersecting) && !content.hidden){
+        observer.disconnect();
+        loadChart();
       }
     },{rootMargin:'250px 0px'});
     chartObservers[group].push(observer);
