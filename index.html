@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="theme-color" content="#f4f8ff">
-  <title>종베 스캐너 v7.0 · 구름대 돌파 자동검색·검증</title>
+  <title>종베 스캐너 v7.1 · 종가매매 기간별 성과 검증</title>
   <style>
     :root{color-scheme:light}*{box-sizing:border-box}
     body{margin:0;background:#101827;color:#f3f6fe;font-family:system-ui,-apple-system,"Noto Sans KR",sans-serif}
@@ -202,10 +202,29 @@
     .v7-statgrid>*{min-width:0}
     @media(min-width:620px){.v7-statgrid{grid-template-columns:repeat(4,minmax(0,1fr))}.v7-filters{grid-template-columns:repeat(4,minmax(0,1fr))}}
 
+
+    /* v7.1 기간별 전략 사후검증 — 모바일 스크롤 표, 밝은 배경 */
+    .v71-panel{background:#f7fbff;border:1px solid #bdd4ec;border-radius:14px;padding:14px;margin:15px 0;color:#253d58}
+    .v71-panel h3{font-size:18px;color:#173c68;margin:4px 0 9px}
+    .v71-controls{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin:11px 0}
+    .v71-controls label{color:#395977;font-size:13px;font-weight:700}
+    .v71-controls select{background:#fff;color:#203c5b;border:1px solid #aebfdb;border-radius:9px;padding:10px;min-height:43px}
+    .v71-table-scroll{overflow-x:auto;overscroll-behavior-inline:contain;border:1px solid #cbdaec;border-radius:10px;background:white}
+    .v71-table{border-collapse:collapse;min-width:690px;width:100%;font-size:13px;color:#264363}
+    .v71-table th,.v71-table td{border-bottom:1px solid #d8e3f1;padding:9px 8px;text-align:right;white-space:nowrap}
+    .v71-table th:first-child,.v71-table td:first-child{text-align:left}
+    .v71-table thead{background:#e2efff}
+    .v71-table tbody tr:nth-child(even){background:#f3f8ff}
+    .v71-table .v71-negative{color:#b74336;font-weight:750}
+    .v71-table .v71-positive{color:#0e7655;font-weight:750}
+    .v71-alert{padding:10px;background:#fff1d8;border:1px solid #efce8b;border-radius:10px;font-weight:700;margin:10px 0;color:#69420b;font-size:13px;line-height:1.6}
+    .v71-note{font-size:12px;line-height:1.8;color:#4e6784;margin:12px 0 4px}
+    .v71-hero{font-weight:760;color:#1f4d79;line-height:1.55;margin:8px 0}
+    @media(min-width:620px){.v71-controls{grid-template-columns:repeat(4,minmax(0,1fr))}}
   </style>
 </head>
 <body><main>
-  <h1 class="app-title">📈 종베 스캐너 <span>v7.0</span></h1>
+  <h1 class="app-title">📈 종베 스캐너 <span>v7.1</span></h1>
   <div class="status-pill">🔎 읽기 전용 · 투자 추천 아님</div>
   <nav class="switcher" aria-label="분석 화면 선택">
     <button id="tabv6" type="button" class="selected" aria-pressed="true">v6 장중 관찰</button>
@@ -241,7 +260,7 @@
 
   <section id="v7panel" aria-label="v7 일목 구름대 종가매매 분석" hidden>
     <div class="v7-hero">
-      <div class="v7-heading">☁️ 구름대 돌파 · 종가매매 실험실 v7.0</div>
+      <div class="v7-heading">☁️ 구름대 돌파 · 종가매매 실험실 v7.1</div>
       <p>확정 1일봉으로 <b>코스피·코스닥 분석 대상 종목의 상향 돌파</b>를 자동 검색하고, 구름 두께·거래량 증가·100점 조건·최근 실패·다음날 종가 변화까지 확인합니다.</p>
       <small>당일 장중 실시간 검색이 아닙니다. 구름대는 9·26·52일 및 26거래일 선행 방식이고, 미래 주가 예측 지표가 아닙니다.</small>
     </div>
@@ -259,6 +278,30 @@
       <p>구름 두께=(구름 상단−하단)/종가 ×100. 얇음 &lt;3%, 보통 3% 이상~8% 미만, 두꺼움 8% 이상. 임의 규칙이며 검증된 상승 확률을 뜻하지 않습니다.</p>
     </details>
     <section class="v7-panel" id="v7backtest"><h3>📊 과거 다음날 변화 검증</h3><p>분석 대기 중입니다.</p></section>
+
+    <section class="v71-panel" id="v71panel" aria-label="종가매매 1일과 3·5일 보유 전략 비교">
+      <h3>🔬 v7.1 종가매매 A·B 전략 비교</h3>
+      <p class="v71-note">A: 신호일 <b>종가 → 다음 거래일 종가(1일)</b>. B: 신호일 <b>종가 → 3·5거래일 후 종가</b>. 추가로 다음 날 시가→종가 변화를 관찰합니다. 확정 일봉만 사용하며 실제 동시호가 체결은 재현하지 않습니다.</p>
+      <div class="v71-controls">
+        <label>평가 기간
+          <select id="v71segment"><option value="test" selected>최근 40% 검증</option><option value="train">이전 60% 비교</option><option value="all">전체 120거래일</option></select>
+        </label>
+        <label>시장
+          <select id="v71market"><option value="ALL">코스피 + 코스닥</option><option value="KOSPI">코스피</option><option value="KOSDAQ">코스닥</option></select>
+        </label>
+        <label>시장 확산도 (5일)
+          <select id="v71breadth"><option value="all">전체 장세</option><option value="up">상승종목 우위 ≥55%</option><option value="down">하락종목 우위 ≤45%</option><option value="middle">중립 45~55%</option></select>
+        </label>
+        <label>왕복 비용 가정
+          <select id="v71cost"><option value="0">0%</option><option value="0.2">0.2%</option><option value="0.3" selected>0.3%</option><option value="0.5">0.5%</option></select>
+        </label>
+      </div>
+      <div class="v71-hero" id="v71summary" role="status" aria-live="polite">v7 구름대 분석을 완료하면 기간별 비교가 표시됩니다.</div>
+      <div id="v71table" class="v71-table-scroll"><p class="v71-note">분석 대기 중입니다.</p></div>
+      <div id="v71nextday" class="v71-note"></div>
+      <div id="v71caution" class="v71-alert" hidden></div>
+      <p class="v71-note">⚠️ <b>평균 순변화</b>는 확정 종가 비율에서 선택한 왕복 비용만 일괄 차감한 <b>가상값</b>입니다. 시가 갭·장중 고저가는 관찰값이며 체결 가능한 손절·익절 가격이 아닙니다. 개별 종목의 종가 체결, 주문 충격, 유동성, 세금과 실제 수수료 구조, 상장폐지·거래정지·분할 등을 재현하지 못합니다. 60/40 시간 분할은 동일한 종목군·점수 규칙을 사용하므로 완전히 독립된 검증이 아닙니다. 표본과 시장 상황에 따라 결과가 달라지며 미래 수익을 예측하지 않습니다. <b>시장 확산도</b>는 분석 가능한 종목의 최근 5거래일 상승 비율로 만든 대용지표이지 코스피·코스닥 지수나 실시간 시장 상태가 아닙니다.</p>
+    </section>
     <section class="v7-panel" id="v7failurehistory"><h3>⚠️ 구름 돌파 후 실패 추적</h3><p>분석 대기 중입니다.</p></section>
     <div class="v7-filters" aria-label="구름대 검색 필터">
       <label class="v7-full">종목명·종목코드<input type="search" id="v7query" placeholder="예: 삼성전자, 005930"></label>
@@ -976,14 +1019,15 @@ async function v6Load(){
     document.getElementById('v6fresh').textContent='⚠️ v6.1은 동작하지만 장중 점수를 웹에 공개하려면 제공된 v6.2 워크플로를 설치하고 실제 거래일 장중에 성공 실행해야 합니다. 기존 v5 데이터는 오른쪽 탭에서 확인할 수 있습니다.';
   }finally{btn.disabled=false;v6Render();}
 }
-// v7.0 cloud lab: confirmed public OHLCV only; no API keys, no intraday prices.
+// v7.1 cloud lab: confirmed public OHLCV only; no API keys, no intraday prices.
 // Historical return is close(t+1)/close(t)-1, not an executable trading return.
 let v7Results=[],v7Failures=[],v7Backtest=[],v7AnalysisDate='',v7Running=false;
+let v71Breadth=new Map(),v71Cutoff='',v71TrainStart='',v71End='';
 const V7_SCAN_DAYS=120,V7_FAILED_WINDOW=20;
 const v7Round=(x,d=1)=>Number.isFinite(x)?Number(x.toFixed(d)):null;
 const v7Pct=x=>x===null||x===undefined?'자료 부족':`${x>0?'+':''}${Number(x).toFixed(1)}%`;
 const v7CloudFmt=x=>x===null||x===undefined?'계산 불가':`${fmt(Math.round(x))}원`;
-function v7Clear(){v7Results=[];v7Failures=[];v7Backtest=[];v7AnalysisDate='';}
+function v7Clear(){v7Results=[];v7Failures=[];v7Backtest=[];v7AnalysisDate='';v71Breadth=new Map();v71Cutoff='';v71TrainStart='';v71End='';}
 function v7Compute(code,base,rows,marketCalendar){
   if(!Array.isArray(rows)||rows.length<80)return null;
   const len=rows.length;
@@ -1086,9 +1130,25 @@ function v7Compute(code,base,rows,marketCalendar){
       }
     }
     const recent20=(lastCal-eventCal)<=V7_FAILED_WINDOW;
+    // All subsequent prices are used ONLY in a past-event evaluation, never in the score at e.
+    // A missing or non-consecutive session remains null; never silently skip sessions.
+    const forwardClose=(n)=>{
+      if(e+n>=len||run[e+n]!==run[e]+n)return null;
+      const v=Number(rows[e+n][4]),baseClose=Number(rows[e][4]);
+      return Number.isFinite(v)&&v>0&&Number.isFinite(baseClose)&&baseClose>0?(v/baseClose-1)*100:null;
+    };
+    const t1=hasNext?rows[e+1]:null;
+    const tClose=Number(rows[e][4]);
+    const pctPrice=(p,reference)=>Number.isFinite(p)&&p>0&&reference>0?(p/reference-1)*100:null;
+    const o1=t1?Number(t1[1]):null,h1=t1?Number(t1[2]):null,
+      l1=t1?Number(t1[3]):null,c1=t1?Number(t1[4]):null;
     testEvents.push({code,name:base.name,market:base.market,date:rows[e][0],score:sc.points,
-      next_pct:nextPct,failed_5d:failed5,failed_date:failureDate,
-      recent_20d:recent20});
+      next_pct:nextPct,ret_1:forwardClose(1),ret_3:forwardClose(3),ret_5:forwardClose(5),
+      next_intraday_pct:o1===null?null:pctPrice(c1,o1),
+      next_gap_pct:o1===null?null:pctPrice(o1,tClose),
+      next_high_pct:h1===null?null:pctPrice(h1,tClose),
+      next_low_pct:l1===null?null:pctPrice(l1,tClose),
+      failed_5d:failed5,failed_date:failureDate,recent_20d:recent20});
   }
   const entry={code,name:base.name,market:base.market,score:latest.points,
     close,cloud_upper:v7Round(upperNow,2),cloud_lower:v7Round(lowerNow,2),
@@ -1151,6 +1211,89 @@ function v7RenderTest(){
     history.append(card);
   }
 }
+
+// v7.1: compare post-signal holding periods under chronological 60/40 display split.
+// Historical outcomes are not used for ranking current candidates.
+function v71BuildBreadth(days,raw){
+  const out=new Map();
+  days.forEach((date,i)=>{
+    let up=0,total=0,valid=0;
+    for(let k=Math.max(0,i-4);k<=i;k++){
+      const b=raw.get(days[k]);
+      if(b&&b.total>=100){up+=b.up;total+=b.total;valid++;}
+    }
+    if(valid<3||total<=0){out.set(date,'unknown');return;}
+    const breadth=up/total;
+    out.set(date,breadth>=.55?'up':breadth<=.45?'down':'middle');
+  });
+  return out;
+}
+const v71Average=arr=>arr.length?arr.reduce((a,b)=>a+b,0)/arr.length:null;
+function v71Pct(v){return v===null?'자료 부족':`${v>=0?'+':''}${v.toFixed(2)}%`;}
+function v71Stats(rows,field,cost){
+  const observed=rows.map(x=>x[field]).filter(Number.isFinite);
+  const net=observed.map(x=>x-cost).sort((a,b)=>a-b);
+  const n=net.length;
+  if(!n)return {n:0,mean:null,win:null,median:null,tail:null};
+  return {n,mean:v71Average(net),win:net.filter(x=>x>0).length*100/n,
+    median:n%2?net[(n-1)/2]:(net[n/2-1]+net[n/2])/2,
+    tail:net[Math.floor((n-1)*0.1)]};
+}
+function v71Render(){
+  const mount=$('v71table'),summary=$('v71summary'),detail=$('v71nextday'),alert=$('v71caution');
+  if(!mount||!summary)return;
+  if(!v71Cutoff||!v7Backtest.length){summary.textContent='분석 결과를 확인하지 못했습니다. v7 구름대 전체 종목 다시 분석을 눌러주세요.';return;}
+  const segment=$('v71segment').value,market=$('v71market').value,regime=$('v71breadth').value,
+    cost=Number($('v71cost').value);
+  const group=v7Backtest.filter(e=>{
+    if(segment==='test'&&e.date<v71Cutoff)return false;
+    if(segment==='train'&&e.date>=v71Cutoff)return false;
+    if(market!=='ALL'&&e.market!==market)return false;
+    const r=v71Breadth.get(e.date)||'unknown';
+    if(regime!=='all'&&r!==regime)return false;
+    return true;
+  });
+  const term=segment==='test'?`검증 ${v71Cutoff}~${v71End}`:
+    segment==='train'?`비교 ${v71TrainStart}~${v71Cutoff} 이전`:`전체 ${v71TrainStart}~${v71End}`;
+  summary.textContent=`📅 ${term} · 구름대 돌파 신호 ${fmt(group.length)}건 · 비용 가정 왕복 ${cost.toFixed(1)}% · 조건별 표본은 중복 포함`;
+  const table=document.createElement('table');table.className='v71-table';
+  const head=document.createElement('thead'),hr=document.createElement('tr');
+  ['신호 점수','보유 전략','확인 건수','평균 순변화','순상승 비율','중앙값','하위 10%'].forEach(x=>hr.append(elem('th','',x)));
+  head.append(hr);table.append(head);
+  const tbody=document.createElement('tbody'),adequate=[];
+  for(const [label,min] of [['전체',0],['60점 이상',60],['80점 이상',80],['100점',100]]){
+    const selected=group.filter(e=>e.score>=min);
+    for(const [hname,field] of [['A · 다음날 종가','ret_1'],['B · 3일 후 종가','ret_3'],['B · 5일 후 종가','ret_5'],['참고 · 다음날 시가→종가','next_intraday_pct']]){
+      const s=v71Stats(selected,field,cost),tr=document.createElement('tr');
+      const values=[label,hname,`${fmt(s.n)}건`,v71Pct(s.mean),s.win===null?'—':`${s.win.toFixed(1)}%`,v71Pct(s.median),v71Pct(s.tail)];
+      values.forEach((value,i)=>{const td=elem('td','',value);
+        if(i===3&&s.mean!==null)td.classList.add(s.mean>=0?'v71-positive':'v71-negative');
+        tr.append(td);
+      });
+      tbody.append(tr);
+      if(s.n>=30&&field!=='next_intraday_pct')adequate.push({label,hname,mean:s.mean,n:s.n});
+    }
+  }
+  table.append(tbody);mount.replaceChildren(table);
+  const eligible=group.filter(e=>e.score>=80);
+  const observed=eligible.filter(e=>Number.isFinite(e.next_gap_pct)&&Number.isFinite(e.next_intraday_pct));
+  const gap=v71Average(observed.map(x=>x.next_gap_pct));
+  const intraday=v71Average(observed.map(x=>x.next_intraday_pct));
+  const high=v71Average(observed.map(x=>x.next_high_pct).filter(Number.isFinite));
+  const low=v71Average(observed.map(x=>x.next_low_pct).filter(Number.isFinite));
+  detail.textContent=`📌 80점 이상 다음 날 가격 관찰 (${fmt(observed.length)}건): 전일 종가 대비 시가 갭 평균 ${v71Pct(gap)}, 다음 날 시가→종가 평균 ${v71Pct(intraday)}, 전일 종가 대비 당일 고가 ${v71Pct(high)}, 저가 ${v71Pct(low)}. 고가/저가는 매매로 확보할 수 있는 수익·손실이 아닙니다.`;
+  const notes=[];
+  if(eligible.length<30)notes.push('선택한 조건의 80점 이상 신호가 30건 미만이므로 결과를 일반화할 수 없습니다.');
+  if(regime!=='all'&&group.length<30)notes.push('장세별 표본이 30건 미만입니다.');
+  if(!adequate.length)notes.push('각 전략의 확인 표본이 30건 미만이어서 유불리 비교를 보류합니다.');
+  else{
+    const best=adequate.sort((a,b)=>b.mean-a.mean)[0];
+    if(best.mean<=0)notes.push('⚠️ 최소 30건 이상인 비교 전략의 순변화 평균이 모두 0% 이하입니다. 이 데이터만으로 매수 전략 채택을 권하지 않습니다.');
+    else notes.push(`가장 높은 과거 평균: ${best.label} / ${best.hname} ${v71Pct(best.mean)} (${fmt(best.n)}건). 사후 결과일 뿐 해당 방식의 실전 우위를 확정하지 않습니다.`);
+  }
+  alert.hidden=!notes.length;alert.textContent=notes.join(' ');
+}
+
 function v7Render(){
   const q=v6N($('v7query').value),state=$('v7signal').value;
   const market=$('v7market').value,thick=$('v7thickness').value,min=Number($('v7min').value);
@@ -1230,6 +1373,7 @@ async function v7Load(){
     if(!Array.isArray(sample)||sample.length<150)throw Error('거래일 달력 자료가 부족합니다.');
     const marketCalendar=new Map(sample.map((r,i)=>[r[0],i]));
     const eventCollector=[];
+    const breadthTotals=new Map(); // 5-day historical market-breadth proxy (not an index)
     let processed=0;
     async function process(prefix,bundle){
       for(const [code,series] of Object.entries(bundle.stocks)){
@@ -1239,6 +1383,15 @@ async function v7Load(){
         const output=v7Compute(code,known,series,marketCalendar);
         if(!output){skipped++;continue;}
         v7Results.push(output.entry);eventCollector.push(...output.events);processed++;
+        for(let i=Math.max(1,series.length-132);i<series.length;i++){
+          const d=series[i][0],prev=series[i-1][0];
+          const cal=marketCalendar.get(d),calPrev=marketCalendar.get(prev);
+          const current=Number(series[i][4]),past=Number(series[i-1][4]);
+          if(cal===undefined||calPrev!==cal-1||!(current>0&&past>0))continue;
+          let bucket=breadthTotals.get(d);
+          if(!bucket){bucket={up:0,total:0};breadthTotals.set(d,bucket);}
+          bucket.total++;if(current>past)bucket.up++;
+        }
       }
     }
     await process(prefixes[0],initial);completed++;
@@ -1258,6 +1411,12 @@ async function v7Load(){
     await Promise.all(Array.from({length:Math.min(4,pending.length)},()=>worker()));
     if(!v7Results.length)throw Error('유효한 구름대 분석 종목이 없습니다.');
     v7Backtest=eventCollector;v7Failures=v7Summarize(eventCollector).failure_examples;
+    // Define chronological split by distinct exchange-session dates, never by signal count.
+    const allDays=[...marketCalendar.keys()].filter(d=>d<=infoDate).slice(-V7_SCAN_DAYS);
+    if(allDays.length>=20){
+      v71TrainStart=allDays[0];v71Cutoff=allDays[Math.floor(allDays.length*0.6)];v71End=allDays.at(-1);
+      v71Breadth=v71BuildBreadth(allDays,breadthTotals);
+    }
     v7AnalysisDate=infoDate;
     const expected=(typeof v7ExpectedAsOf==='string'?v7ExpectedAsOf:'-');
     const stale=expected!=='-'&&infoDate<expected;
@@ -1266,7 +1425,7 @@ async function v7Load(){
     warn.textContent=stale?`⚠️ 원본 확정 일봉이 기대 거래일 ${expected}보다 오래됐습니다. ${infoDate} 기준 과거 분석으로, 오늘 종가매매 판단에는 사용하지 마세요.`:
       '⚠️ 마감된 확정 일봉 데이터만 사용합니다. 장중 종목 자동 검색·실시간 시세가 아닙니다.';
     if(recordError.length){warn.textContent+=` 일부 구간 자료를 못 받았습니다 (${recordError.length}파일). 이때 검색·통계는 전체 시장이 아닌 부분 표본입니다.`;}
-    v7Stats();v7RenderTest();v7Render();
+    v7Stats();v7RenderTest();v71Render();v7Render();
   }catch(e){status.textContent='⚠️ 구름대 전체 분석 실패: '+e.message;}
   finally{v7Running=false;$('v7refresh').disabled=false;}
 }
@@ -1287,6 +1446,7 @@ function v6Switch(kind){
   $(id).addEventListener(id==='v7query'?'input':'change',v7Render));
 $('v6refresh').addEventListener('click',v6Load);
 $('v7refresh').addEventListener('click',()=>{v7Clear();v7Load();});
+['v71segment','v71market','v71breadth','v71cost'].forEach(id=>$(id).addEventListener('change',v71Render));
 v6Switch(['#v5','#v6','#v7'].includes(location.hash)?location.hash.slice(1):'v6');
 v6Load();
 
