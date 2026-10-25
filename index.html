@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="theme-color" content="#f4f8ff">
-  <title>종베 스캐너 v7.3.5 · v5 검색 초기화·500억·1000억</title>
+  <title>종베 스캐너 v7.3.6 · v7.3 추정 거래대금 500억·1000억 추가</title>
   <style>
     :root{color-scheme:light}*{box-sizing:border-box}
     body{margin:0;background:#101827;color:#f3f6fe;font-family:system-ui,-apple-system,"Noto Sans KR",sans-serif}
@@ -269,7 +269,7 @@
   </style>
 </head>
 <body><main>
-  <h1 class="app-title">📈 종베 스캐너 <span>v7.3.5</span></h1>
+  <h1 class="app-title">📈 종베 스캐너 <span>v7.3.6</span></h1>
   <div class="status-pill">🔎 읽기 전용 · 투자 추천 아님</div>
   <nav class="switcher" aria-label="분석 화면 선택">
     <button id="tabv6" type="button" class="selected" aria-pressed="true">v6 장중 관찰</button>
@@ -369,7 +369,7 @@
         <label>평가 기간<select id="v73period"><option value="test" selected>최근 40% (기본)</option><option value="train">이전 60%</option><option value="all">전체 약 120거래일</option></select></label>
         <label>점수<select id="v73score"><option value="80" selected>80점 이상</option><option value="100">100점</option><option value="60">60점 이상</option></select></label>
         <label>시장<select id="v73market"><option value="ALL">코스피+코스닥</option><option value="KOSPI">코스피</option><option value="KOSDAQ">코스닥</option></select></label>
-        <label>최소 추정 거래대금<select id="v73liquid"><option value="0">제한 없음</option><option value="100000000">1억 원</option><option value="1000000000" selected>10억 원</option><option value="5000000000">50억 원</option><option value="10000000000">100억 원</option></select></label>
+        <label>최소 추정 거래대금<select id="v73liquid"><option value="0">제한 없음</option><option value="100000000">1억 원</option><option value="1000000000" selected>10억 원</option><option value="5000000000">50억 원</option><option value="10000000000">100억 원</option><option value="50000000000">500억 원</option><option value="100000000000">1,000억 원</option></select></label>
         <label>신호일 전일 대비 상승률 상한<select id="v73rise"><option value="0">제외 없음</option><option value="5">+5% 이하</option><option value="10" selected>+10% 이하</option><option value="15">+15% 이하</option><option value="20">+20% 이하</option></select></label>
         <label>왕복 비용<select id="v73cost"><option value="0">0%</option><option value="0.3" selected>0.3%p</option><option value="0.5">0.5%p</option></select></label>
         <label>시초가 불리 체결 오차<select id="v73slip"><option value="0">0%p</option><option value="0.2" selected>0.2%p</option><option value="0.5">0.5%p</option><option value="1">1.0%p</option></select></label>
