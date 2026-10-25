@@ -384,7 +384,18 @@ def export_charts(df: pd.DataFrame, result: dict) -> tuple[int, int]:
     for old in chart_dir.glob('*.json'):
         old.unlink()
     chunks = defaultdict(dict)
+    monthly_chunks = defaultdict(dict)  # v8: 기존 452거래일 자료로 월봉 집계
     profile_chunks = defaultdict(dict)
+    # 해당 월의 마지막 정규 거래일까지 원본에 있어야 "월봉 확정"으로 표시한다.
+    monthly_calendar = xcals.get_calendar('XKRX')
+    asof_session = pd.Timestamp(result['asof'])
+    month_last_day = asof_session + pd.offsets.MonthEnd(0)
+    last_month_session = monthly_calendar.date_to_session(month_last_day, direction='previous')
+    final_month_closed = asof_session >= last_month_session
+    # 452거래일 범위가 첫 달 중간에서 시작하면 그 첫 달 집계는 생략한다.
+    first_day = calendar[0]
+    first_session_of_month = monthly_calendar.date_to_session(first_day.replace(day=1), direction='next')
+    first_month_is_partial = first_day > first_session_of_month
     kind_profiles=fetch_company_profiles()
     count = 0
     for code, group in df[df['Code'].isin(allowed)].groupby('Code', sort=True):
@@ -415,6 +426,28 @@ def export_charts(df: pd.DataFrame, result: dict) -> tuple[int, int]:
             continue
         prefix=str(code)[:2]
         chunks[prefix][str(code)] = lines
+        # 월봉: 원시 일봉에서 직접 시가(첫날)/고가(월중 최대)/저가(월중 최소)/
+        # 종가(마지막날)/거래량·거래대금(월중 합계)을 계산한다.
+        # 월마감 확인 전 마지막 월봉은 잠정 상태로 제공한다.
+        valid = group.copy()
+        valid = valid[(valid['Open']>0) & (valid['High']>=valid['Low']) &
+                      (valid['Low']>0) & (valid['Close']>0) & (valid['Volume']>=0)]
+        valid['year_month']=valid['Date'].dt.strftime('%Y-%m')
+        month_lines = []
+        for ym, mon in valid.groupby('year_month', sort=True):
+            if first_month_is_partial and ym == first_day.strftime('%Y-%m'):
+                continue
+            mon=mon.sort_values('Date')
+            if mon.empty: continue
+            v=int(mon['Volume'].sum())
+            # Amount는 원본 일별 거래대금이다. 일부 소스가 누락되면 보수적으로
+            # 종가×거래량으로 추정하며 UI에서 추정치임을 알린다.
+            amt=mon['Amount'] if 'Amount' in mon.columns else None
+            amount=int(amt.fillna(mon['Close']*mon['Volume']).clip(lower=0).sum()) if amt is not None else int((mon['Close']*mon['Volume']).sum())
+            completed=(ym < result['asof'][:7] or (ym == result['asof'][:7] and final_month_closed))
+            month_lines.append([ym,int(mon.iloc[0]['Open']),int(mon['High'].max()),
+                                int(mon['Low'].min()),int(mon.iloc[-1]['Close']),v,amount,bool(completed)])
+        monthly_chunks[prefix][str(code)] = month_lines
         latest_row=group.iloc[-1]
         shares=latest_row.get('Stocks')
         shares=int(shares) if pd.notna(shares) and 0<float(shares)<1e11 else None
@@ -435,7 +468,8 @@ def export_charts(df: pd.DataFrame, result: dict) -> tuple[int, int]:
         raise RuntimeError(f'차트 누락: 분석 {len(allowed)}종목 / 차트 {count}종목. 배포 중단.')
     total_bytes=0
     for prefix, stocks in chunks.items():
-        payload = {'schema':'jongbe-ohlcv-v1','asof':result['asof'],'stocks':stocks,'profiles':profile_chunks[prefix]}
+        payload = {'schema':'jongbe-ohlcv-v1','asof':result['asof'],'stocks':stocks,'profiles':profile_chunks[prefix],
+                   'monthly_schema':'jongbe-month-v1','months':monthly_chunks[prefix]}
         blob = json.dumps(payload,ensure_ascii=False,separators=(',',':')).encode('utf-8')
         total_bytes += len(blob)
         (chart_dir / (prefix+'.json')).write_bytes(blob)
@@ -467,6 +501,8 @@ def main():
     result['chart_count']=chart_count
     result['chart_days']=CHART_VISIBLE_DAYS
     result['chart_schema']='jongbe-ohlcv-v1'
+    result['monthly_schema']='jongbe-month-v1'
+    result['monthly_source_sessions']=HISTORY_DAYS
     tmp=OUT.with_suffix('.json.tmp')
     tmp.write_text(json.dumps(result,ensure_ascii=False,separators=(',',':'))+'\n',encoding='utf-8')
     os.replace(tmp,OUT)

@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="theme-color" content="#f4f8ff">
-  <title>종베 스캐너 v7.3.7 · 일봉 차트 켜짐·꺼짐</title>
+  <title>종베 스캐너 v8.0 · 월봉 전종목 추가</title>
   <style>
     :root{color-scheme:light}*{box-sizing:border-box}
     body{margin:0;background:#101827;color:#f3f6fe;font-family:system-ui,-apple-system,"Noto Sans KR",sans-serif}
@@ -270,15 +270,51 @@
     .v73-table td.gain{color:#08745c;font-weight:800}
     .v73-empty{font-weight:800;color:#934c35}
     @media(min-width:650px){.v73-control-grid{grid-template-columns:repeat(3,minmax(0,1fr))}}
+
+    /* v8 월봉: 기존 v5/v6/v7과 분리된 코스피·코스닥 월봉 화면 */
+    .switcher{grid-template-columns:repeat(2,minmax(0,1fr));gap:9px}
+    .switcher button{font-size:13px;padding:12px 6px;min-height:49px}
+    .v8-hero{background:linear-gradient(150deg,#ecf5ff,#f9fcff);border:1px solid #bdd4f1;border-radius:16px;padding:18px;margin:15px 0;color:#21405f}
+    .v8-hero h2{font-size:21px;margin:0 0 9px}
+    .v8-hero p{margin:5px 0;color:#405d78;font-size:14px}
+    .v8-meta{padding:15px;border:1px solid #bcd2eb;background:#edf5ff;color:#294b71;border-radius:13px;margin:14px 0;line-height:1.7;font-size:13px}
+    .v8-controls{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;background:#eff5fd;border:1px solid #c9d9ee;border-radius:14px;padding:15px;margin:16px 0}
+    .v8-controls label{font-size:13px;color:#355273}
+    .v8-controls input,.v8-controls select{min-height:46px;background:#fff;color:#1e3e5f;border:1px solid #b9cce0;border-radius:10px}
+    .v8-search{grid-column:1/-1}
+    .v8-searchbar{display:flex;gap:7px}
+    .v8-searchbar input{flex:1;min-width:0}
+    .v8-searchbar button{padding:9px 11px;font-size:14px;white-space:nowrap}
+    .v8-searchbar button[type="reset"]{background:#e2eaf5;border:1px solid #b9cbe2;color:#23496c}
+    .v8-mini{margin:6px 0;font-size:12px;color:#536b86}
+    .v8-card{border:1px solid #bfd4eb;border-radius:15px;background:#fff;box-shadow:0 2px 9px #18375f12;padding:15px;margin:13px 0;color:#263f5b}
+    .v8-card h3{font-size:18px;color:#1c3f66;margin:0 0 8px}
+    .v8-pill{display:inline-block;background:#edf3fb;color:#32587b;font-size:11px;font-weight:750;padding:5px 7px;border-radius:8px;margin-left:8px}
+    .v8-score{font-size:22px;font-weight:900;color:#147b59;white-space:nowrap}
+    .v8-cardhead{display:flex;justify-content:space-between;gap:12px;align-items:center}
+    .v8-facts{display:grid;grid-template-columns:1fr 1fr;gap:9px;font-size:13px;line-height:1.5;margin:14px 0;color:#3f5876}
+    .v8-chart{background:#fff;border:1px solid #ccdced;border-radius:12px;padding:12px;margin:12px 0}
+    .v8-charthead{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:9px;margin-bottom:8px;color:#1e456b;font-weight:800;font-size:14px}
+    .v8-chartctrl{display:flex;gap:5px;flex-wrap:wrap;margin:9px 0}
+    .v8-chartctrl button{padding:7px 10px;border-radius:8px;background:#e6eefb;color:#2b5184;border:1px solid #b9cbe6;font-size:12px}
+    .v8-chartctrl button.selected{background:#3672d7;color:#fff;border-color:#3672d7}
+    .v8-chartctrl button.v8-off{background:#ebedf2;color:#56657a}
+    .v8-chart svg{width:100%;height:auto;display:block;touch-action:pan-y}
+    .v8-legend{font-size:12px;line-height:1.8;color:#3a5876;margin:7px 0}
+    .v8-legend b{margin-right:10px}
+    .v8-warn{padding:11px;background:#fff2d9;border:1px solid #e5c383;color:#765119;border-radius:10px;font-size:12px;line-height:1.75;margin:13px 0}
+    .v8-empty{border:1px dashed #a5c2dd;padding:19px;background:#f7fbff;border-radius:10px;color:#3e5c7c;font-size:14px}
+    @media(min-width:670px){.switcher{grid-template-columns:repeat(4,minmax(0,1fr))}.v8-controls{grid-template-columns:repeat(3,minmax(0,1fr))}}
   </style>
 </head>
 <body><main>
-  <h1 class="app-title">📈 종베 스캐너 <span>v7.3.7</span></h1>
+  <h1 class="app-title">📈 종베 스캐너 <span>v8.0</span></h1>
   <div class="status-pill">🔎 읽기 전용 · 투자 추천 아님</div>
   <nav class="switcher" aria-label="분석 화면 선택">
     <button id="tabv6" type="button" class="selected" aria-pressed="true">v6 장중 관찰</button>
     <button id="tabv5" type="button" aria-pressed="false">v5 일봉 전종목</button>
     <button id="tabv7" type="button" aria-pressed="false">v7 ☁️ 구름 검색</button>
+    <button id="tabv8" type="button" aria-pressed="false">v8 🗓️ 월봉 전종목</button>
   </nav>
   <section id="v6panel" aria-label="v6 장중 관찰 화면">
     <div class="v6-hero">
@@ -403,6 +439,40 @@
     <div class="titlebar"><h2>☁️ 구름대 조건 검색</h2><small id="v7count">분석 대기 중</small></div>
     <section id="v7results" aria-label="구름대 분석 대상 종목"><p class="v6-empty">확정 일봉 데이터를 분석 중입니다.</p></section>
     <p class="v7-disclaimer">상향 돌파는 전 거래일 종가 ≤ 그날 구름 상단이고 당일 종가 &gt; 당일 구름 상단인 경우입니다. 사용한 선행 구름은 해당 거래일보다 26거래일 전에 계산된 값입니다. 거래량 증가율은 직전 20거래일 평균 대비이며, 5거래일 연속 확보되지 않은 종목은 추적 결과를 확정하지 않습니다. 장중 v6과 분석 시간·데이터가 다릅니다.</p>
+  </section>
+
+  <section id="v8panel" aria-label="v8 확정 월봉 전종목 검색" hidden>
+    <div class="v8-hero">
+      <h2>🗓️ v8 월봉 전종목 · 코스피·코스닥</h2>
+      <p>v5에서 분석한 종목들을 <strong>1개월 봉</strong>으로 다시 보여줍니다. 종목명 검색, 월봉 점수, 월 5·10·20개월선, 월간 거래량·거래대금, 월봉 차트 켜짐·꺼짐을 지원합니다.</p>
+      <p>현재 공개 원본 452거래일을 월별로 집계하므로 차트는 <strong>최근 약 20~22개월</strong>만 제공됩니다. 3년·5년 전체 월봉이나 60개월선은 아직 제공하지 않습니다.</p>
+    </div>
+    <div class="bar"><button id="v8refresh" type="button">🗓️ 월봉 전종목 다시 분석</button><small>확정 일봉을 월별 집계 · 장중 실시간 아님</small></div>
+    <div class="v8-meta" id="v8status" role="status" aria-live="polite">v8 화면을 열면 월봉 자료를 불러옵니다.</div>
+    <div class="v8-controls" aria-label="월봉 전종목 검색 조건">
+      <div class="v8-search">
+        <label for="v8query">종목명 또는 종목코드</label>
+        <form id="v8searchForm" class="v8-searchbar" role="search">
+          <input id="v8query" type="search" placeholder="예: 삼성전자, 005930" autocomplete="off" enterkeyhint="search">
+          <button type="submit">🔎 검색</button>
+          <button id="v8clear" type="reset">초기화</button>
+        </form>
+        <small>검색 버튼을 누르면 다른 필터와 관계없이 해당 종목을 찾습니다. 초기화하면 원래 조건 검색으로 돌아갑니다.</small>
+      </div>
+      <label>월봉 판단 기준<select id="v8reference">
+        <option value="closed" selected>마감이 끝난 최근 월봉</option>
+        <option value="preview">이번 달 잠정 월봉 포함</option>
+      </select></label>
+      <label>시장<select id="v8market"><option value="ALL">코스피+코스닥</option><option value="KOSPI">코스피</option><option value="KOSDAQ">코스닥</option></select></label>
+      <label>최소 월봉 점수<select id="v8score"><option value="0">전체 점수</option><option value="40" selected>40점 이상</option><option value="60">60점 이상</option><option value="80">80점 이상</option><option value="100">100점만</option></select></label>
+      <label>월봉 이동평균 조건<select id="v8ma"><option value="all">전체</option><option value="aligned">정배열: 5·10·20개월선</option><option value="cross">5·10개월선 골든크로스</option><option value="up">상승 월봉</option><option value="down">하락 월봉</option></select></label>
+      <label>최소 월간 거래대금<select id="v8value"><option value="0">제한 없음</option><option value="100">100억 원</option><option value="500">500억 원</option><option value="1000">1,000억 원</option><option value="5000">5,000억 원</option><option value="10000">1조 원</option></select></label>
+      <label>정렬<select id="v8sort"><option value="score">월봉 점수순</option><option value="value">월간 거래대금순</option><option value="change">월간 등락률순</option><option value="volume">월간 거래량 증가순</option></select></label>
+    </div>
+    <div class="titlebar"><h2>🗓️ 월봉 조건 검색 결과</h2><small id="v8counter">분석 대기 중</small></div>
+    <section id="v8results" aria-label="월봉 전종목 조건 검색 결과"><p class="v8-empty">월봉 전종목 분석 대기 중입니다.</p></section>
+    <div class="pager"><button id="v8more" type="button" hidden>15종목 더 보기</button></div>
+    <div class="v8-warn"><b>주의</b> · 월봉 점수는 관찰용 임의 규칙으로 v5 일봉 점수와 서로 다릅니다. 월봉은 일봉을 합산한 결과입니다. 진행 중인 달은 마감이 확정되지 않아 수시로 변할 수 있으므로 기본값은 <b>지난 마감 완료 월봉</b>입니다. 모든 상장종목이 아니라 기존 v5가 일봉 데이터 유효성을 확인한 코스피·코스닥 분석 대상만 표시합니다. 데이터 기준일이 늦으면 최신 매매 판단에 쓰지 마세요. 상승 확률이나 매수 추천이 아닙니다.</div>
   </section>
 
   <section id="v5panel" aria-label="v5 전종목 일봉 검색" hidden>
@@ -1054,7 +1124,7 @@ async function load(){
     const note=(d.minor_version==='5.0'?'':' ⚠️ v5 데이터가 아닙니다. 자동 분석을 다시 실행하세요.')+(signalsReady?'':' ⚠️ 정배열·골든크로스 데이터가 아직 없습니다. 새 scanner.py로 분석을 다시 실행해 주세요.')+(trendReady?'':' ⚠️ 추세 색상은 아직 계산되지 않았습니다. v6.6 scanner.py로 분석을 다시 실행해 주세요.')+(chartReady?'':' ⚠️ 일봉 차트 데이터가 아직 게시되지 않았습니다. v6.5 scanner.yml까지 설치하고 분석을 다시 실행해 주세요.');
     text($('status'),`데이터 기준일 ${infoDate} · 기대 거래일 ${expected} · 갱신 작업 ${d.updated||'-'} · 전체 ${fmt(d.universe_size||0)}종목 / 분석 유효 ${fmt(d.analyzed_count||0)}종목${note}`);
   }catch(e){displayBacktest(null);dataRows=[];$('freshness').hidden=false;text($('freshness'),'⚠️ 분석 결과를 읽지 못했습니다. GitHub Actions 실행 상태를 확인하세요.');text($('status'),'⚠️ 분석 데이터를 읽지 못했습니다: '+e.message);}
-  finally{$('refresh').disabled=false;display();if($('tabv7').classList.contains('selected'))v7Load();}
+  finally{$('refresh').disabled=false;display();if($('tabv7').classList.contains('selected'))v7Load();if($('tabv8').classList.contains('selected'))v8Load();}
 }
 ['query','viewmode','market','mafilter','trendfilter','minscore','minvalue','change','sort','position'].forEach(id=>
   $(id).addEventListener(id==='query'?'input':'change',()=>{countShown=20;display();}));
@@ -1692,16 +1762,228 @@ async function v7Load(){
 }
 let v7ExpectedAsOf='-';
 
+// v8.0: 월봉은 scanner.py가 공개 확정 일봉 452거래일로 집계한 자료만 사용한다.
+// 원본의 종목 표본과 최신 기준일은 v5 데이터와 일치해야 한다.
+let v8Items=[],v8AsOf='',v8Loading=false,v8Submitted='',v8Shown=15;
+const v8Norm=s=>String(s??'').normalize('NFKC').toLowerCase().replace(/\s+/g,'');
+const v8Money=n=>Number.isFinite(n)?fmt(Math.round(n))+'원':'자료 부족';
+const v8Pct=n=>Number.isFinite(n)?(n>=0?'+':'')+n.toFixed(2)+'%':'자료 부족';
+const v8Avg=(arr,k,at=arr.length-1)=>at+1<k?null:arr.slice(at+1-k,at+1).reduce((sum,v)=>sum+Number(v),0)/k;
+
+function v8Calc(stock){
+  const raw=stock.months;
+  // 월이 끝난 후의 자료만 사용하는 것이 기본. 현재 월 잠정값은 사용자가 별도 선택.
+  const months=$('v8reference').value==='preview'?raw:raw.filter(m=>m[7]===true);
+  if(months.length<5)return null;
+  const i=months.length-1,m=months[i],prev=months[i-1];
+  const closes=months.map(m=>m[4]);
+  const ma5=v8Avg(closes,5),ma10=v8Avg(closes,10),ma20=v8Avg(closes,20);
+  const p5=v8Avg(closes,5,i-1),p10=v8Avg(closes,10,i-1);
+  const cross=ma5!==null&&ma10!==null&&p5!==null&&p10!==null&&p5<=p10&&ma5>ma10;
+  const aligned=ma20!==null&&ma10!==null&&ma5>ma10&&ma10>ma20;
+  const pct=prev?.[4]>0?100*(m[4]/prev[4]-1):null;
+  const volAvg=i>=6?v8Avg(months.slice(0,i).map(x=>x[5]),6):null;
+  const volRatio=volAvg>0?m[5]/volAvg:null;
+  const closePos=m[2]>m[3]?100*(m[4]-m[3])/(m[2]-m[3]):50;
+  // 해석이 쉬운 임의 월봉 점수. 상승 확률이나 백테스트된 성과가 아니다.
+  const score=(m[4]>ma5?20:0)+(ma10!==null&&ma5>ma10?20:0)+
+    (ma20!==null&&ma10>ma20?20:0)+(pct!==null&&pct>0?15:0)+
+    (volRatio!==null&&volRatio>=1.3?15:0)+(closePos>=75?10:0);
+  return {...stock, latest:m,usedMonths:months.length,score,ma5,ma10,ma20,
+    aligned,cross,pct,volRatio,closePos,valueEok:m[6]/1e8,partial:!m[7]};
+}
+
+function v8Render(){
+  const items=v8Items.map(v8Calc).filter(Boolean);
+  const searching=v8Norm(v8Submitted).length>0,q=v8Norm(v8Submitted);
+  const market=$('v8market').value,min=Number($('v8score').value);
+  const ma=$('v8ma').value,value=Number($('v8value').value),sort=$('v8sort').value;
+  const filtered=items.filter(x=>{
+    if(searching)return v8Norm(x.name).includes(q)||v8Norm(x.code).includes(q);
+    if(market!=='ALL'&&x.market!==market)return false;
+    if(x.score<min || x.valueEok<value)return false;
+    if(ma==='aligned'&&!x.aligned)return false;
+    if(ma==='cross'&&!x.cross)return false;
+    if(ma==='up'&&!(x.pct>0))return false;
+    if(ma==='down'&&!(x.pct<0))return false;
+    return true;
+  });
+  const sorting=(x,y)=>sort==='value'?y.valueEok-x.valueEok||y.score-x.score:
+    sort==='change'?(y.pct??-1e10)-(x.pct??-1e10)||y.score-x.score:
+    sort==='volume'?(y.volRatio??-1e10)-(x.volRatio??-1e10)||y.score-x.score:
+    y.score-x.score||y.valueEok-x.valueEok;
+  filtered.sort((x,y)=>searching?(v8Norm(x.name)===q||v8Norm(x.code)===q?-1:0)-(v8Norm(y.name)===q||v8Norm(y.code)===q?-1:0)||sorting(x,y):sorting(x,y));
+  $('v8counter').textContent=`${fmt(filtered.length)}종목 · ${fmt(Math.min(v8Shown,filtered.length))}개 표시`;
+  const output=$('v8results');output.replaceChildren();
+  if(!filtered.length){output.append(elem('p','v8-empty',searching?'해당 종목을 분석 대상에서 찾지 못했습니다. 종목코드를 확인하거나 v5 일봉 전종목에서 검색하세요.':'선택한 월봉 조건에 맞는 종목이 없습니다. 점수·이평·거래대금 조건을 완화해 보세요.'));$('v8more').hidden=true;return;}
+  const frag=document.createDocumentFragment();
+  for(const x of filtered.slice(0,v8Shown)){
+    const card=elem('article','v8-card');
+    const head=elem('div','v8-cardhead'),left=elem('div');
+    left.append(elem('h3','',`${x.name} (${x.code})`));
+    left.append(elem('span','v8-pill',x.market==='KOSPI'?'코스피':'코스닥'));
+    if(x.partial)left.append(elem('span','v8-pill','⚠️ 잠정 월봉'));
+    if(x.aligned)left.append(elem('span','v8-pill','월봉 정배열'));
+    if(x.cross)left.append(elem('span','v8-pill','월봉 골든크로스'));
+    head.append(left,elem('strong','v8-score',x.score+'점'));card.append(head);
+    const facts=elem('div','v8-facts');
+    [`판단 월봉 ${x.latest[0]}${x.partial?' (잠정)':''}`,`월 종가 ${v8Money(x.latest[4])}`,
+     `전월 대비 ${v8Pct(x.pct)}`,`월간 거래대금 ${fmt(Math.round(x.valueEok))}억 원`,
+     `월 거래량 ${fmt(x.latest[5])}주`,`이전 6개월 대비 거래량 ${x.volRatio===null?'자료 부족':x.volRatio.toFixed(2)+'배'}`,
+     `5개월선 ${v8Money(x.ma5)}`,`10개월선 ${v8Money(x.ma10)}`,
+     `20개월선 ${v8Money(x.ma20)}`,`월중 종가 위치 ${x.closePos.toFixed(1)}%`]
+    .forEach(v=>facts.append(elem('span','',v)));card.append(facts);
+    v8AddChart(card,x);
+    frag.append(card);
+  }
+  output.append(frag);
+  $('v8more').hidden=filtered.length<=v8Shown;
+}
+
+function v8AddChart(card,x){
+  const box=elem('section','v8-chart');
+  box.setAttribute('aria-label',x.name+' 월봉 차트');
+  const header=elem('div','v8-charthead');
+  header.append(elem('span','','📊 월봉 차트 · 5·10·20개월선'));
+  const toggle=elem('button','chart-power','🟢 켜짐');toggle.type='button';
+  header.append(toggle);box.append(header);
+  const body=elem('div');
+  const toolbar=elem('div','v8-chartctrl');
+  const graph=elem('div');
+  let period=12;
+  for(const [months,label] of [[6,'6개월'],[12,'1년'],[0,'전체']]){
+    const btn=elem('button',months===12?'selected':'',label);btn.type='button';
+    btn.addEventListener('click',()=>{period=months;for(const b of toolbar.querySelectorAll('button'))b.classList.remove('selected');btn.classList.add('selected');v8Draw(graph,x,period);});
+    toolbar.append(btn);
+  }
+  body.append(toolbar,elem('div','v8-legend','🔴 상승 월봉  ·  🔵 하락 월봉  ·  파랑 5개월선 / 주황 10개월선 / 보라 20개월선'));
+  body.append(graph,elem('p','v8-mini',x.partial?'⚠️ 마지막 월봉은 현재 월 마감 전의 잠정 값으로, 월말까지 가격·거래량·점수가 변할 수 있습니다.':'월봉은 모두 과거 확정 일봉을 월별 집계한 데이터입니다.'));
+  box.append(body);card.append(box);
+  toggle.setAttribute('aria-expanded','true');
+  toggle.addEventListener('click',()=>{
+    const on=body.hidden;body.hidden=!on;
+    toggle.textContent=on?'🟢 켜짐':'⚪ 꺼짐';toggle.classList.toggle('off',!on);
+    toggle.setAttribute('aria-expanded',String(on));
+  });
+  v8Draw(graph,x,period);
+}
+function v8Draw(root,x,period){
+  root.replaceChildren();
+  const all=x.months;
+  const n=period===0?all.length:Math.min(period,all.length),start=all.length-n;
+  const subset=all.slice(start);
+  if(!subset.length){root.append(elem('p','v8-empty','월봉 자료가 없습니다.'));return;}
+  const NS='http://www.w3.org/2000/svg',W=640,H=320,L=57,R=18,T=20,P=235,V=265,VH=38;
+  const svg=document.createElementNS(NS,'svg');
+  svg.setAttribute('viewBox',`0 0 ${W} ${H}`);svg.setAttribute('role','img');
+  svg.setAttribute('aria-label',x.name+' 월봉 '+(period?period+'개월':'전체')+' 그래프');
+  const add=(tag,attr={},tx)=>{const a=document.createElementNS(NS,tag);for(const [k,v] of Object.entries(attr))a.setAttribute(k,String(v));if(tx!==undefined)a.textContent=String(tx);svg.append(a);return a;};
+  const ma=(i,k)=>i+1>=k?all.slice(i+1-k,i+1).reduce((s,m)=>s+m[4],0)/k:null;
+  const prices=[...subset.flatMap(r=>[r[2],r[3]]),...subset.flatMap((r,j)=>[ma(start+j,5),ma(start+j,10),ma(start+j,20)]).filter(Number.isFinite)];
+  const lo=Math.min(...prices),hi=Math.max(...prices),margin=Math.max(1,(hi-lo)*.08);
+  const min=lo-margin,max=hi+margin,scale=val=>P-(val-min)/(max-min)*(P-T);
+  const step=(W-L-R)/subset.length,mid=j=>L+(j+.5)*step;
+  for(let i=0;i<=4;i++){
+    const val=min+(max-min)*i/4,y=scale(val);
+    add('line',{x1:L,x2:W-R,y1:y,y2:y,stroke:'#dce7f4','stroke-width':1});
+    add('text',{x:L-6,y:y+4,'text-anchor':'end',fill:'#667e99','font-size':10},fmt(Math.round(val)));
+  }
+  const vmax=Math.max(1,...subset.map(m=>m[5]));
+  subset.forEach((m,j)=>{
+    const xmid=mid(j),up=m[4]>=m[1],color=up?'#d95369':'#2877c9';
+    const top=Math.min(scale(m[1]),scale(m[4])),bottom=Math.max(scale(m[1]),scale(m[4]));
+    const opa=m[7]===false?0.72:1;
+    add('line',{x1:xmid,x2:xmid,y1:scale(m[2]),y2:scale(m[3]),stroke:color,'stroke-width':2,opacity:opa});
+    const body=add('rect',{x:xmid-Math.max(3,Math.min(13,step*.31)),y:top,width:Math.max(6,Math.min(26,step*.62)),height:Math.max(2,bottom-top),fill:color,opacity:opa});
+    const title=document.createElementNS(NS,'title');title.textContent=`${m[0]}${m[7]?'':' (잠정)'} · 시가 ${fmt(m[1])} / 고가 ${fmt(m[2])} / 저가 ${fmt(m[3])} / 종가 ${fmt(m[4])}원`;body.append(title);
+    const volH=(m[5]/vmax)*VH;
+    add('rect',{x:xmid-Math.max(3,Math.min(13,step*.3)),y:V+VH-volH,width:Math.max(6,Math.min(26,step*.6)),height:volH,fill:color,opacity:.53});
+    if(j===0 || j===subset.length-1 || j%Math.max(1,Math.ceil(subset.length/5))===0){
+      add('text',{x:xmid,y:H-5,'text-anchor':'middle',fill:'#5e7793','font-size':11},m[0].slice(2));
+    }
+  });
+  for(const [len,color] of [[5,'#2365c4'],[10,'#e58a25'],[20,'#995cd0']]){
+    let points=[];
+    const flush=()=>{if(points.length>1)add('polyline',{points:points.join(' '),fill:'none',stroke:color,'stroke-width':2.2,'stroke-linejoin':'round'});points=[];};
+    subset.forEach((m,j)=>{
+      const v=ma(start+j,len);if(v===null){flush();return;}
+      points.push(`${mid(j)},${scale(v)}`);
+    });flush();
+  }
+  add('text',{x:L,y:V-7,fill:'#71849a','font-size':11},'월간 거래량');
+  root.append(svg);
+}
+
+async function v8Load(){
+  if(v8Loading)return;
+  if(!dataRows.length){$('v8status').textContent='v5 일봉 데이터가 아직 없습니다. 자동 분석 결과를 확인하거나 새로고침 후 다시 열어주세요.';return;}
+  if(v8AsOf===infoDate && v8Items.length){v8Render();return;}
+  v8Loading=true;
+  $('v8refresh').disabled=true;
+  v8Items=[];v8AsOf='';v8Shown=15;
+  const status=$('v8status');
+  const index=new Map(dataRows.map(x=>[String(x.code),x]));
+  const prefixes=[...new Set(dataRows.map(x=>String(x.code).slice(0,2)))].sort();
+  let done=0,broken=0,missing=0;
+  const errors=[];
+  try{
+    if(!prefixes.length)throw Error('월봉 분석 대상 종목이 없습니다.');
+    const worker=async(queue)=>{
+      while(queue.length){
+        const prefix=queue.shift();
+        try{
+          const r=await fetch(`./charts/${prefix}.json?asof=${encodeURIComponent(infoDate)}`,{cache:'no-store'});
+          if(!r.ok)throw Error(prefix+' 파일 HTTP '+r.status);
+          const data=await r.json();
+          if(data.schema!=='jongbe-ohlcv-v1'||data.asof!==infoDate||!data.stocks)throw Error('일봉 기준일과 차트 기준일이 다릅니다.');
+          if(data.monthly_schema!=='jongbe-month-v1'||!data.months)throw Error('v8 월봉 자료가 없습니다. 새 scanner.py를 업로드하고 Actions를 다시 실행하세요.');
+          for(const [code,raw] of Object.entries(data.months)){
+            const base=index.get(code);
+            if(!base)continue;
+            if(!Array.isArray(raw)||raw.length<5){missing++;continue;}
+            const valid=raw.filter(m=>Array.isArray(m)&&/^\d{4}-\d{2}$/.test(m[0])&&m.length>=8&&
+              [m[1],m[2],m[3],m[4],m[5],m[6]].every(Number.isFinite)&&m[4]>0&&m[3]>0);
+            if(valid.length<5){missing++;continue;}
+            v8Items.push({name:base.name,code,market:base.market,months:valid});
+          }
+        }catch(e){broken++;errors.push(prefix+': '+e.message);}
+        done++;
+        if(done%4===0||done===prefixes.length)status.textContent=`🗓️ 월봉 전종목 계산 중 ${done}/${prefixes.length}묶음 · ${fmt(v8Items.length)}종목`;
+        await new Promise(resolve=>setTimeout(resolve,0));
+      }
+    };
+    const queue=prefixes.slice();
+    await Promise.all(Array.from({length:Math.min(4,queue.length)},()=>worker(queue)));
+    if(!v8Items.length)throw Error(errors.length?errors[0]:'월봉 데이터가 없습니다.');
+    v8AsOf=infoDate;
+    const lag=v7ExpectedAsOf!=='-'&&infoDate<v7ExpectedAsOf;
+    status.textContent=`✅ 공개 확정 일봉 ${infoDate} 기준 · 월봉 분석 ${fmt(v8Items.length)}종목 / v5 대상 ${fmt(dataRows.length)}종목 · ${fmt(prefixes.length-broken)}/${fmt(prefixes.length)}파일 성공 · 과거 첫 월봉 일부 제외${lag?' · ⚠️ 원본 데이터 지연':''}${broken?' · ⚠️ 일부 파일 누락 '+broken+'개':''}`;
+    v8Render();
+  }catch(e){status.textContent='⚠️ 월봉 전종목 분석 실패: '+e.message;}
+  finally{v8Loading=false;$('v8refresh').disabled=false;}
+}
+$('v8searchForm').addEventListener('submit',e=>{
+  e.preventDefault();v8Submitted=$('v8query').value.trim();v8Shown=15;v8Render();$('v8query').blur();
+  requestAnimationFrame(()=>$('v8results').scrollIntoView({behavior:'smooth',block:'start'}));
+});
+$('v8searchForm').addEventListener('reset',e=>{
+  e.preventDefault();v8Submitted='';$('v8query').value='';v8Shown=15;v8Render();
+});
+['v8reference','v8market','v8score','v8ma','v8value','v8sort'].forEach(id=>$(id).addEventListener('change',()=>{v8Shown=15;v8Render();}));
+$('v8more').addEventListener('click',()=>{v8Shown+=15;v8Render();});
+$('v8refresh').addEventListener('click',()=>{v8AsOf='';v8Load();});
+
 function v6Switch(kind){
-  for(const t of ['v5','v6','v7']){
+  for(const t of ['v5','v6','v7','v8']){
     const selected=t===kind;
     $(''+t+'panel').hidden=!selected;
     const b=$('tab'+t);b.classList.toggle('selected',selected);b.setAttribute('aria-pressed',String(selected));
   }
   try{history.replaceState(null,'','#'+kind);}catch{}
   if(kind==='v7')v7Load();
+  if(kind==='v8')v8Load();
 }
-['v5','v6','v7'].forEach(t=>$('tab'+t).addEventListener('click',()=>v6Switch(t)));
+['v5','v6','v7','v8'].forEach(t=>$('tab'+t).addEventListener('click',()=>v6Switch(t)));
 $('v6searchForm').addEventListener('submit',event=>{
   event.preventDefault();
   v6SubmittedQuery=$('v6query').value.trim();
@@ -1736,7 +2018,7 @@ $('v6refresh').addEventListener('click',v6Load);
 $('v7refresh').addEventListener('click',()=>{v7Clear();v7Load();});
 ['v71segment','v71market','v71breadth','v71cost','v72slip'].forEach(id=>$(id).addEventListener('change',v71Render));
 ['v73period','v73score','v73market','v73liquid','v73rise','v73cost','v73slip'].forEach(id=>$(id).addEventListener('change',v73Render));
-v6Switch(['#v5','#v6','#v7'].includes(location.hash)?location.hash.slice(1):'v6');
+v6Switch(['#v5','#v6','#v7','#v8'].includes(location.hash)?location.hash.slice(1):'v6');
 v6Load();
 
 </script>
