@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="theme-color" content="#f4f8ff">
-  <title>종베 스캐너 v8.0 · 월봉 전종목 추가</title>
+  <title>종베 스캐너 v8.1 · 기업소개 PER·PBR 추가</title>
   <style>
     :root{color-scheme:light}*{box-sizing:border-box}
     body{margin:0;background:#101827;color:#f3f6fe;font-family:system-ui,-apple-system,"Noto Sans KR",sans-serif}
@@ -291,6 +291,14 @@
     .v8-card h3{font-size:18px;color:#1c3f66;margin:0 0 8px}
     .v8-pill{display:inline-block;background:#edf3fb;color:#32587b;font-size:11px;font-weight:750;padding:5px 7px;border-radius:8px;margin-left:8px}
     .v8-score{font-size:22px;font-weight:900;color:#147b59;white-space:nowrap}
+    .v8-card .company-title{color:#1c416b;font-size:19px;font-weight:850;text-decoration-color:#5a8ed2}
+    .v8-card .company-panel{background:#f5f9ff;border-color:#c4d8ed}
+    .v8-card .company-panel>summary{color:#174b80;border-bottom-color:#d4e1f0}
+    .v8-card .company-grid>div{border-bottom-color:#d6e3f0}
+    .v8-card .company-grid dt{color:#667e9d}
+    .v8-card .company-grid dd,.v8-card .company-note{color:#26425e}
+    .v8-card .company-links a{color:#225db5}
+    .v8-card .company-load{color:#385c81}
     .v8-cardhead{display:flex;justify-content:space-between;gap:12px;align-items:center}
     .v8-facts{display:grid;grid-template-columns:1fr 1fr;gap:9px;font-size:13px;line-height:1.5;margin:14px 0;color:#3f5876}
     .v8-chart{background:#fff;border:1px solid #ccdced;border-radius:12px;padding:12px;margin:12px 0}
@@ -308,7 +316,7 @@
   </style>
 </head>
 <body><main>
-  <h1 class="app-title">📈 종베 스캐너 <span>v8.0</span></h1>
+  <h1 class="app-title">📈 종베 스캐너 <span>v8.1</span></h1>
   <div class="status-pill">🔎 읽기 전용 · 투자 추천 아님</div>
   <nav class="switcher" aria-label="분석 화면 선택">
     <button id="tabv6" type="button" class="selected" aria-pressed="true">v6 장중 관찰</button>
@@ -601,17 +609,23 @@ function addCompanyPanel(card,stock){
     pair('상장일',p.listed_date||'미수집');
     pair('지역',p.region||'미수집');
     pair('시가총액 (확정 종가 × 상장주식수)',Number.isFinite(p.market_cap_krw)?`${fmt(Math.round(p.market_cap_krw/1e8))}억 원`:'자료 부족');
+    // PER / PBR data is KRX's dated published ratio, never inferred from OHLCV.
+    const ratio=(v)=>Number.isFinite(v)&&v>0?`${v.toFixed(2)}배`:(p.valuation_date?'산출 불가 (적자·자료 없음 등)':'미수집');
+    pair('PER · 주가수익비율',ratio(p.per));
+    pair('PBR · 주가순자산비율',ratio(p.pbr));
+    pair('PER·PBR 기준일',p.valuation_date||'미수집');
     pair('상장주식수',Number.isFinite(p.listed_shares)?`${fmt(p.listed_shares)}주`:'자료 부족');
     pair('최근 약 1년 고가',Number.isFinite(p.period_high)?`${fmt(p.period_high)}원`:'자료 부족');
     pair('최근 약 1년 저가',Number.isFinite(p.period_low)?`${fmt(p.period_low)}원`:'자료 부족');
     body.replaceChildren(container);
-    const note=elem('p','company-note',`📅 주가·시가총액·고저가는 ${infoDate||'기준일 미확인'}의 확정 일봉 기반. 업종·제품·대표자·상장일 등은 KIND 상장법인 자료 연결이 가능할 때만 표시되며 수집 실패 시 미수집입니다. 회사 요약 정보는 실시간 공시가 아닙니다.`);
+    const note=elem('p','company-note',`📅 주가·시가총액·고저가는 ${infoDate||'기준일 미확인'}의 확정 일봉 기반. 업종·제품·대표자·상장일 등은 KIND 상장법인 자료를, PER·PBR은 KRX 공개 지표를 조회할 수 있을 때만 표시합니다. 값이 없으면 추정하지 않으며, 금융정보와 주가의 기준일이 다를 수 있습니다. 적자 등의 이유로 PER 산출이 불가능할 수 있습니다. 실시간 정보가 아닙니다.`);
     body.append(note);
     const links=elem('div','company-links');
     const link=(caption,url)=>{const a=elem('a','',caption);a.href=url;a.target='_blank';a.rel='noopener noreferrer';links.append(a);};
     if(/^\d{6}$/.test(stock.code))link('📊 네이버 금융 상세정보',`https://finance.naver.com/item/main.naver?code=${stock.code}`);
     link('🏢 KIND 상장법인 기업정보','https://kind.krx.co.kr/corpgeneral/corpList.do?method=loadInitPage&searchType=13');
     link('📄 DART 전자공시','https://dart.fss.or.kr/');
+    link('📉 KRX PER·PBR 확인','https://data.krx.co.kr/');
     const homepage=String(p.website||'').trim();
     const withScheme=/^https?:\/\//i.test(homepage)?homepage:/^www\./i.test(homepage)?'https://'+homepage:'';
     if(withScheme && /^https?:\/\/[^\s]+$/i.test(withScheme))link('🌐 회사 홈페이지',withScheme);
@@ -628,7 +642,7 @@ function addCompanyPanel(card,stock){
 }
 function companyNameButton(stock){
   const btn=elem('button','company-title',`${stock.name} (${stock.code})`);
-  btn.type='button';btn.title='회사 이름을 눌러 기업 기본정보 확인 (주가 차트는 자동 표시)';
+  btn.type='button';btn.title='회사 이름을 눌러 업종·시가총액·PER·PBR 등 기업 기본정보 보기';
   return btn;
 }
 // 각 종목의 일봉 차트는 기본 켜짐이며, 각 카드의 버튼으로 독립적으로 끌 수 있다.
@@ -1820,7 +1834,7 @@ function v8Render(){
   for(const x of filtered.slice(0,v8Shown)){
     const card=elem('article','v8-card');
     const head=elem('div','v8-cardhead'),left=elem('div');
-    left.append(elem('h3','',`${x.name} (${x.code})`));
+    const companyBtn=companyNameButton(x);left.append(companyBtn);
     left.append(elem('span','v8-pill',x.market==='KOSPI'?'코스피':'코스닥'));
     if(x.partial)left.append(elem('span','v8-pill','⚠️ 잠정 월봉'));
     if(x.aligned)left.append(elem('span','v8-pill','월봉 정배열'));
@@ -1833,6 +1847,8 @@ function v8Render(){
      `5개월선 ${v8Money(x.ma5)}`,`10개월선 ${v8Money(x.ma10)}`,
      `20개월선 ${v8Money(x.ma20)}`,`월중 종가 위치 ${x.closePos.toFixed(1)}%`]
     .forEach(v=>facts.append(elem('span','',v)));card.append(facts);
+    const companyPanel=addCompanyPanel(card,x);
+    companyBtn.addEventListener('click',()=>{companyPanel.open=!companyPanel.open;});
     v8AddChart(card,x);
     frag.append(card);
   }

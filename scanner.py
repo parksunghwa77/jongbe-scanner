@@ -368,6 +368,78 @@ def fetch_company_profiles() -> dict:
         return {}
 
 
+def fetch_krx_valuations(asof: str) -> dict:
+    """Get one dated KRX whole-market PER/PBR snapshot (no estimates).
+
+    KRX's public table is not guaranteed to be reachable from GitHub Actions.
+    Always tolerate service errors and *never* replace unavailable financial ratios
+    with guessed values. The date is explicitly tied to the chart's EOD as-of.
+    """
+    from math import isfinite
+
+    def metric(raw):
+        value = str(raw if raw is not None else '').strip().replace(',', '')
+        if value in ('', '-', 'N/A', 'NaN', 'null', 'None'):
+            return None
+        try:
+            number = float(value)
+        except (TypeError, ValueError):
+            return None
+        # KRX prints dash/zero when ratios cannot be calculated (e.g., no EPS).
+        return round(number, 2) if isfinite(number) and 0 < number < 1_000_000 else None
+
+    endpoint='https://data.krx.co.kr/comm/bldAttendant/getJsonData.cmd'
+    payload={'bld':'dbms/MDC/STAT/standard/MDCSTAT03501',
+             'mktId':'ALL','trdDd':asof.replace('-', ''),'locale':'ko_KR'}
+    session=requests.Session()
+    session.headers.update({
+        'User-Agent':'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 '
+                     '(KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
+        'Accept':'application/json, text/javascript, */*; q=0.01',
+        'Content-Type':'application/x-www-form-urlencoded; charset=UTF-8',
+        'Origin':'https://data.krx.co.kr',
+        'Referer':'https://data.krx.co.kr/contents/MDC/MAIN/main/index.cmd',
+        'X-Requested-With':'XMLHttpRequest',
+    })
+    try:
+        for attempt in range(2):
+            if attempt:
+                # A number of KRX deployments require their own initial session.
+                try:
+                    session.get('https://data.krx.co.kr/', timeout=(3, 6))
+                except requests.RequestException:
+                    pass
+            try:
+                response=session.post(endpoint,data=payload,timeout=(4, 12))
+                response.raise_for_status()
+                raw=response.json()
+                output=raw.get('output') if isinstance(raw, dict) else None
+                if not isinstance(output,list) or len(output)<100:
+                    continue
+                result={}
+                for row in output:
+                    if not isinstance(row,dict):
+                        continue
+                    code=str(row.get('ISU_SRT_CD','')).strip()
+                    if len(code)!=6 or not code.isdigit():
+                        continue
+                    result[code]={
+                        'per':metric(row.get('PER')),
+                        'pbr':metric(row.get('PBR')),
+                        'valuation_date':asof,
+                        'valuation_source':'KRX',
+                    }
+                if len(result)>=100:
+                    log.info('KRX %s PER/PBR 데이터 %d종목 확보',asof,len(result))
+                    return result
+            except (requests.RequestException,ValueError) as exc:
+                log.warning('KRX PER/PBR 요청 불가 (시도 %d): %s',attempt+1,exc)
+        log.warning('KRX PER/PBR 서비스 응답 없음; 회사정보에 미수집 표시 (기타 기능 정상)')
+        return {}
+    finally:
+        session.close()
+
+
 def export_charts(df: pd.DataFrame, result: dict) -> tuple[int, int]:
     """공개 확정 일봉의 차트 데이터를 접두어별 묶음 JSON으로 생성.
 
@@ -397,6 +469,7 @@ def export_charts(df: pd.DataFrame, result: dict) -> tuple[int, int]:
     first_session_of_month = monthly_calendar.date_to_session(first_day.replace(day=1), direction='next')
     first_month_is_partial = first_day > first_session_of_month
     kind_profiles=fetch_company_profiles()
+    valuations=fetch_krx_valuations(result['asof'])
     count = 0
     for code, group in df[df['Code'].isin(allowed)].groupby('Code', sort=True):
         group = group.sort_values('Date').drop_duplicates('Date', keep='last')
@@ -453,6 +526,7 @@ def export_charts(df: pd.DataFrame, result: dict) -> tuple[int, int]:
         shares=int(shares) if pd.notna(shares) and 0<float(shares)<1e11 else None
         cap=int(lines[-1][4]*shares) if shares is not None else None
         extra=kind_profiles.get(str(code),{})
+        val=valuations.get(str(code),{})
         profile_chunks[prefix][str(code)]={
             'name':str(latest_row.get('Name') or ''),'market':str(latest_row.get('Market') or ''),
             'market_cap_krw':cap,'listed_shares':shares,
@@ -462,6 +536,9 @@ def export_charts(df: pd.DataFrame, result: dict) -> tuple[int, int]:
             'ceo':extra.get('ceo',''),'listed_date':extra.get('listed_date',''),
             'website':extra.get('website',''),'region':extra.get('region',''),
             'kind_available':bool(extra),
+            'per':val.get('per'),'pbr':val.get('pbr'),
+            'valuation_date':val.get('valuation_date',''),
+            'valuation_source':val.get('valuation_source',''),
         }
         count += 1
     if count != len(allowed):
