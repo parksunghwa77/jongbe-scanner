@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="theme-color" content="#f4f8ff">
-  <title>종베 스캐너 v8.1 · 기업소개 PER·PBR 추가</title>
+  <title>종베 스캐너 v8.2 · 종목 기준일 옆 PER·PBR</title>
   <style>
     :root{color-scheme:light}*{box-sizing:border-box}
     body{margin:0;background:#101827;color:#f3f6fe;font-family:system-ui,-apple-system,"Noto Sans KR",sans-serif}
@@ -313,10 +313,16 @@
     .v8-warn{padding:11px;background:#fff2d9;border:1px solid #e5c383;color:#765119;border-radius:10px;font-size:12px;line-height:1.75;margin:13px 0}
     .v8-empty{border:1px dashed #a5c2dd;padding:19px;background:#f7fbff;border-radius:10px;color:#3e5c7c;font-size:14px}
     @media(min-width:670px){.switcher{grid-template-columns:repeat(4,minmax(0,1fr))}.v8-controls{grid-template-columns:repeat(3,minmax(0,1fr))}}
-  </style>
+  
+    /* v8.2: v5 카드 기준일 옆에 해당 종목 PER/PBR 표시 */
+    .stock-date-ratios{display:flex;align-items:center;flex-wrap:wrap;gap:5px 7px;margin-top:5px;font-size:12px;line-height:1.6}
+    .stock-date-ratios .stock-ratio{display:inline-block;padding:2px 7px;border:1px solid #c9daec;border-radius:7px;background:#eef5fc;color:#244c73;font-weight:650;white-space:nowrap}
+    .stock-date-ratios .stock-ratio.is-missing{background:#f1f2f5;color:#6a7888;border-color:#d9e0e7}
+    .stock-date-ratios .ratio-date{font-size:11px;color:#5b7592}
+</style>
 </head>
 <body><main>
-  <h1 class="app-title">📈 종베 스캐너 <span>v8.1</span></h1>
+  <h1 class="app-title">📈 종베 스캐너 <span>v8.2</span></h1>
   <div class="status-pill">🔎 읽기 전용 · 투자 추천 아님</div>
   <nav class="switcher" aria-label="분석 화면 선택">
     <button id="tabv6" type="button" class="selected" aria-pressed="true">v6 장중 관찰</button>
@@ -589,6 +595,44 @@ async function getStockProfile(code){
   await getChartSeries(code); // 기존 차트 번들/기준일 검사와 캐시를 동일하게 이용
   const bundle=await chartBundles.get(code.slice(0,2));
   return bundle.profiles && bundle.profiles[code] ? bundle.profiles[code] : null;
+}
+// v8.2: v5 종목의 기준일 옆 PER/PBR. 공개 KRX 정보만 사용하고 없는 값은 추측하지 않는다.
+// 많은 종목 표시 시 네트워크 과부하를 피하기 위해 스크롤로 가까워진 카드만 조회한다.
+function addV5RatiosNearDate(container,code){
+  const per=elem('span','stock-ratio is-missing','PER 조회 중');
+  const pbr=elem('span','stock-ratio is-missing','PBR 조회 중');
+  const valuationDate=elem('span','ratio-date');
+  container.append(per,pbr,valuationDate);
+  const apply=(profile)=>{
+    if(!container.isConnected)return;
+    const p=profile||{};
+    const formatRatio=(label,value)=>label+' '+(
+      Number.isFinite(value)&&value>0 ? value.toFixed(2)+'배' :
+      p.valuation_date ? '산출 불가' : '미수집');
+    per.textContent=formatRatio('PER',p.per);
+    pbr.textContent=formatRatio('PBR',p.pbr);
+    per.classList.toggle('is-missing',!(Number.isFinite(p.per)&&p.per>0));
+    pbr.classList.toggle('is-missing',!(Number.isFinite(p.pbr)&&p.pbr>0));
+    valuationDate.textContent=p.valuation_date?'지표 '+p.valuation_date+' 기준':'';
+    valuationDate.title='PER·PBR은 KRX 공개 지표입니다. 일봉 기준일과 다를 수 있습니다.';
+  };
+  let started=false;
+  let observer=null;
+  const load=async()=>{
+    if(started||!container.isConnected)return;
+    started=true;
+    if(observer)observer.disconnect();
+    try{apply(await getStockProfile(String(code)));}
+    catch(e){apply(null);}
+  };
+  if(typeof IntersectionObserver==='undefined')setTimeout(load,0);
+  else{
+    observer=new IntersectionObserver(entries=>{
+      if(entries.some(x=>x.isIntersecting)){observer.disconnect();load();}
+    },{rootMargin:'260px 0px'});
+    chartObservers.v5.push(observer);
+    observer.observe(container);
+  }
 }
 function addCompanyPanel(card,stock){
   const panel=elem('details','company-panel');
@@ -1098,7 +1142,10 @@ function display(){
     if(x.ma_aligned===true)title.append(elem('span','pill','이평 정배열'));
     if(x.golden_cross===true)title.append(elem('span','goldenpill','오늘 골든크로스'));
     title.append(trendChip(x));
-    left.append(title,elem('div','muted',`기준일 ${x.date || infoDate}`));
+    const dateAndRatios=elem('div','stock-date-ratios');
+    dateAndRatios.append(elem('span','muted',`기준일 ${x.date || infoDate}`));
+    addV5RatiosNearDate(dateAndRatios,x.code);
+    left.append(title,dateAndRatios);
     top.append(left,elem('div','score',`${x.score}점`));
     const detail=elem('div','details');
     [ `종가 ${fmt(x.price)}원`,`전일 대비 ${Number(x.change)>0?'+':''}${x.change}%`,
