@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="theme-color" content="#f4f8ff">
-  <title>종베 스캐너 v7.3.1 · 종목 검색 수정</title>
+  <title>종베 스캐너 v7.3.3 · 돌파 실패 목록 숨김</title>
   <style>
     :root{color-scheme:light}*{box-sizing:border-box}
     body{margin:0;background:#101827;color:#f3f6fe;font-family:system-ui,-apple-system,"Noto Sans KR",sans-serif}
@@ -189,6 +189,16 @@
     .v7-stat span{font-size:12px;color:#47617f}
     .v7-filters{display:grid;grid-template-columns:1fr 1fr;gap:9px;background:#eaf3fd;border:1px solid #c7d9ee;border-radius:12px;padding:13px}
     .v7-full{grid-column:1/-1}
+    /* v7.3.2: explicit mobile search button; typing alone does not filter results. */
+    .v7-searchblock{display:flex;flex-direction:column;gap:9px}
+    .v7-searchblock>label{color:#234769;font-size:14px;font-weight:800}
+    .v7-search-row{display:flex;gap:7px;align-items:stretch;max-width:100%;flex-wrap:wrap}
+    .v7-search-row>input{flex:1 1 110px;width:auto;min-width:110px;min-height:45px;background:#fff;color:#1c395a;border:1px solid #9fb6d1;border-radius:10px}
+    .v7-search-row>input::placeholder{color:#7b8fa5}
+    .v7-search-row>button{flex:0 0 auto;min-height:45px;padding:9px 11px;border-radius:10px;font-size:14px}
+    .v7-search-row>#v7searchButton{background:#2e70da;color:#fff}
+    .v7-search-row>#v7clearButton{background:#e4eaf2;color:#355673;border:1px solid #b6c8db}
+    .v7-searchblock>small{font-size:12px;color:#426588;line-height:1.65}
     .v7-stock{margin:12px 0;padding:15px;border-radius:13px;background:#fff;border:1px solid #d0dfed}
     .v7-stock-head{display:flex;justify-content:space-between;gap:9px}
     .v7-bigscore{font-size:24px;font-weight:900;white-space:nowrap;color:#147655}
@@ -247,7 +257,7 @@
   </style>
 </head>
 <body><main>
-  <h1 class="app-title">📈 종베 스캐너 <span>v7.3.1</span></h1>
+  <h1 class="app-title">📈 종베 스캐너 <span>v7.3.3</span></h1>
   <div class="status-pill">🔎 읽기 전용 · 투자 추천 아님</div>
   <nav class="switcher" aria-label="분석 화면 선택">
     <button id="tabv6" type="button" class="selected" aria-pressed="true">v6 장중 관찰</button>
@@ -350,9 +360,16 @@
       <div id="v73detail" class="v73-mini-summary">시그널일별 동일가중 바스켓 위험도를 계산하고 있습니다.</div>
       <div id="v73warn" class="v73-warning">⚠️ 신호일 거래대금은 <b>종가×거래량</b>의 추정치이며 실제 거래대금이 아닙니다. 상한 필터는 신호일 종가로 계산합니다. 모든 수익률은 체결·세금·주문충격·상장폐지 보정이 불완전한 과거 실험입니다. 여러 필터를 사후 선택하면 우연히 좋아 보일 수 있습니다. 반드시 별도 미래 기간에서 재검증해야 합니다.</div>
     </section>
-    <section class="v7-panel" id="v7failurehistory"><h3>⚠️ 구름 돌파 후 실패 추적</h3><p>분석 대기 중입니다.</p></section>
     <div class="v7-filters" aria-label="구름대 검색 필터">
-      <label class="v7-full">종목명·종목코드<input type="search" id="v7query" placeholder="예: 삼성전자, 005930"><small>🔎 종목명을 입력하면 돌파 상태·점수·시장·구름 두께 조건과 관계없이 전체 분석 종목에서 검색합니다. 결과는 아래에 표시됩니다.</small></label>
+      <div class="v7-full v7-searchblock">
+        <label for="v7query">종목명·종목코드</label>
+        <form id="v7searchForm" class="v7-search-row" role="search">
+          <input type="search" id="v7query" placeholder="예: 삼성전자, 005930" enterkeyhint="search" autocomplete="off">
+          <button type="submit" id="v7searchButton">🔎 검색</button>
+          <button type="button" id="v7clearButton">초기화</button>
+        </form>
+        <small>이름·종목코드를 입력한 뒤 <b>검색</b>을 눌러주세요. 검색하면 돌파 상태·점수·시장·구름 두께와 관계없이 전체 분석 종목에서 찾습니다. 초기화하면 조건 검색으로 돌아갑니다.</small>
+      </div>
       <label>돌파·실패 상태<select id="v7signal"><option value="today">오늘 상향 돌파</option><option value="recent">최근 5거래일 돌파</option><option value="failed">최근 20거래일 돌파 실패</option><option value="above">구름대 위</option><option value="thin">얇은 구름대</option><option value="all">전체 종목</option></select></label>
       <label>최소 100점 점수<select id="v7min"><option value="0" selected>전체</option><option value="40">40점 이상</option><option value="60">60점 이상</option><option value="80">80점 이상</option></select></label>
       <label>시장<select id="v7market"><option value="ALL">코스피+코스닥</option><option value="KOSPI">코스피</option><option value="KOSDAQ">코스닥</option></select></label>
@@ -1251,15 +1268,7 @@ function v7RenderTest(){
   table.append(tbody);box.append(table);
   if(stats.all.observed<30)box.append(elem('p','v7-alert','⚠️ 관측 표본이 30건 미만입니다. 평균치와 상승 비율을 일반화하지 마세요.'));
   box.append(elem('p','v7-disclaimer','주의: 과거 확정 종가만 비교한 사후 검증입니다. 오늘 분석 가능한 종목만 과거에도 포함하는 생존·선택 편향이 있고, 상장폐지·분할·거래정지·수수료·슬리피지·매수 가능 가격 등을 완전히 반영하지 않습니다. 여러 종목/날짜를 독립 표본처럼 계산한 단순 평균이며, 전략 실현 수익·미래 상승 확률이 아닙니다. 5일 실패는 돌파 이후 5거래일 내 종가가 구름 상단 이하로 되돌아온 경우입니다. 5일 미경과 신호는 실패율 분모에서 제외합니다.'));
-  const history=$('v7failurehistory');history.replaceChildren();
-  history.append(elem('h3','','⚠️ 최근 20거래일 돌파 실패 추적'));
-  if(!stats.failure_examples.length){history.append(elem('p','','최근 20거래일 내 구름대 상향 돌파 후 실패가 확인된 사례가 없습니다. 또는 확인할 충분한 거래일 데이터가 없습니다.'));return;}
-  for(const e of stats.failure_examples.slice(0,12)){
-    const card=elem('div','v7-failure');
-    card.append(elem('strong','',`${e.name} (${e.code})`));
-    card.append(elem('span','',`돌파 ${e.date} → 구름 복귀 ${e.failed_date} · 돌파 당시 ${e.score}점 · 다음날 ${v7Pct(e.next_pct)}`));
-    history.append(card);
-  }
+
 }
 
 // v7.2: compare next-session official open to later closes with chronological 60/40 split.
@@ -1458,8 +1467,9 @@ function v73Render(){
   warning.textContent=cautions.join(' ');
 }
 
+let v7SubmittedQuery='';
 function v7Render(){
-  const q=v6N($('v7query').value),state=$('v7signal').value;
+  const q=v6N(v7SubmittedQuery),state=$('v7signal').value;
   const searching=q.length>0;
   const market=$('v7market').value,thick=$('v7thickness').value,min=Number($('v7min').value);
   const sorter=$('v7sort').value;
@@ -1485,7 +1495,7 @@ function v7Render(){
     sorter==='recent'?(Number(b.breakout_today)-Number(a.breakout_today))||Number(b.recent_breakout)-Number(a.recent_breakout)||b.score-a.score:
     b.score-a.score||(b.volume_increase_pct??-1e10)-(a.volume_increase_pct??-1e10));
   }
-  $('v7count').textContent=searching?`🔎 ${fmt(list.length)}종목 검색됨 · 다른 조건 무시 · 최대 30개 표시`:`${fmt(list.length)}종목 · 최대 30개 표시`;
+  $('v7count').textContent=searching?`🔎 '${v7SubmittedQuery}' ${fmt(list.length)}종목 검색됨 · 다른 조건 무시 · 최대 30개 표시`:`${fmt(list.length)}종목 · 최대 30개 표시`;
   const out=$('v7results');clearChartObservers('v7');out.replaceChildren();
   if(!list.length){out.append(elem('p','v6-empty',searching?'현재 분석 종목에서 찾지 못했습니다. 코드나 종목명을 확인하거나 v5 탭에서 검색하세요.':v7Results.length?'조건을 만족하는 종목이 없습니다. 조건을 완화해 보세요.':'분석 결과가 아직 없습니다.'));return;}
   const frag=document.createDocumentFragment();
@@ -1613,8 +1623,25 @@ function v6Switch(kind){
 }
 ['v5','v6','v7'].forEach(t=>$('tab'+t).addEventListener('click',()=>v6Switch(t)));
 ['v6query','v6min','v6risk'].forEach(id=>$(id).addEventListener(id==='v6query'?'input':'change',v6Render));
-['v7query','v7signal','v7min','v7market','v7thickness','v7sort'].forEach(id=>
-  $(id).addEventListener(id==='v7query'?'input':'change',v7Render));
+['v7signal','v7min','v7market','v7thickness','v7sort'].forEach(id=>
+  $(id).addEventListener('change',v7Render));
+function v7RunNamedSearch(){
+  v7SubmittedQuery=$('v7query').value.trim();
+  v7Render();
+  $('v7query').blur();
+  // The result cards are below the historical tables; jump to them after pressing Search.
+  requestAnimationFrame(()=>$('v7count').parentElement.scrollIntoView({behavior:'smooth',block:'start'}));
+}
+$('v7searchForm').addEventListener('submit',event=>{
+  event.preventDefault();
+  v7RunNamedSearch();
+});
+$('v7clearButton').addEventListener('click',()=>{
+  $('v7query').value='';v7SubmittedQuery='';
+  v7Render();
+  $('v7query').blur();
+  requestAnimationFrame(()=>$('v7count').parentElement.scrollIntoView({behavior:'smooth',block:'start'}));
+});
 $('v6refresh').addEventListener('click',v6Load);
 $('v7refresh').addEventListener('click',()=>{v7Clear();v7Load();});
 ['v71segment','v71market','v71breadth','v71cost','v72slip'].forEach(id=>$(id).addEventListener('change',v71Render));
