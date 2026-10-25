@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="theme-color" content="#f4f8ff">
-  <title>종베 스캐너 v7.2 · 다음날 시초가 매도 검증</title>
+  <title>종베 스캐너 v7.3 · 시초가 매도 리스크 필터 검증</title>
   <style>
     :root{color-scheme:light}*{box-sizing:border-box}
     body{margin:0;background:#101827;color:#f3f6fe;font-family:system-ui,-apple-system,"Noto Sans KR",sans-serif}
@@ -224,10 +224,30 @@
     .v72-focus.warn{background:#fff1df;border-color:#e8c192;color:#82501b}
     .v72-focus strong{font-size:19px;font-weight:850}
     @media(min-width:620px){.v71-controls{grid-template-columns:repeat(4,minmax(0,1fr))}}
+
+    /* v7.3 · risk-filter experiment. Operates on the same OHLCV as v7.2. */
+    .v73-panel{background:#f7fcfa;border:1px solid #a8cfca;border-radius:15px;padding:15px;margin:16px 0;color:#234354}
+    .v73-panel h3{font-size:19px;margin:0 0 10px;color:#155b50}
+    .v73-panel p{color:#42667a;font-size:13px;line-height:1.75}
+    .v73-control-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin:12px 0}
+    .v73-control-grid label{font-size:12px;color:#315a6d;font-weight:750;line-height:1.5}
+    .v73-control-grid select{color:#21394a;background:white;border:1px solid #b4ccda;border-radius:9px;padding:11px 7px;font-size:14px;min-height:47px;width:100%}
+    .v73-mini-summary{padding:11px 12px;border-radius:10px;background:#e4f2ff;border:1px solid #b8d0e8;font-size:13px;font-weight:680;line-height:1.8}
+    .v73-warning{padding:11px 12px;background:#fff0dd;border:1px solid #e8c69b;border-radius:10px;font-size:12px;line-height:1.8;color:#73531d}
+    .v73-table-scroll{max-width:100%;overflow-x:auto;overscroll-behavior-inline:contain;border:1px solid #cadae6;border-radius:10px;background:white;margin:11px 0}
+    .v73-table{border-collapse:collapse;min-width:890px;width:100%;font-size:13px;color:#244458}
+    .v73-table th,.v73-table td{padding:9px 9px;text-align:right;border-bottom:1px solid #dce6ef;white-space:nowrap}
+    .v73-table th:first-child,.v73-table td:first-child{text-align:left}
+    .v73-table th{background:#dcedf8;color:#244058}
+    .v73-table tr:nth-child(even){background:#f3f8fc}
+    .v73-table td.loss{color:#b33f3f;font-weight:800}
+    .v73-table td.gain{color:#08745c;font-weight:800}
+    .v73-empty{font-weight:800;color:#934c35}
+    @media(min-width:650px){.v73-control-grid{grid-template-columns:repeat(3,minmax(0,1fr))}}
   </style>
 </head>
 <body><main>
-  <h1 class="app-title">📈 종베 스캐너 <span>v7.2</span></h1>
+  <h1 class="app-title">📈 종베 스캐너 <span>v7.3</span></h1>
   <div class="status-pill">🔎 읽기 전용 · 투자 추천 아님</div>
   <nav class="switcher" aria-label="분석 화면 선택">
     <button id="tabv6" type="button" class="selected" aria-pressed="true">v6 장중 관찰</button>
@@ -263,7 +283,7 @@
 
   <section id="v7panel" aria-label="v7 일목 구름대 종가매매 분석" hidden>
     <div class="v7-hero">
-      <div class="v7-heading">☁️ 구름대 돌파 · 종가매매 실험실 v7.2</div>
+      <div class="v7-heading">☁️ 구름대 돌파 · 종가매매 실험실 v7.3</div>
       <p>확정 1일봉으로 <b>코스피·코스닥 분석 대상 종목의 상향 돌파</b>를 자동 검색하고, 구름 두께·거래량 증가·100점 조건·최근 실패·다음날 종가 변화까지 확인합니다.</p>
       <small>당일 장중 실시간 검색이 아닙니다. 구름대는 9·26·52일 및 26거래일 선행 방식이고, 미래 주가 예측 지표가 아닙니다.</small>
     </div>
@@ -309,6 +329,26 @@
       <div id="v71nextday" class="v71-note"></div>
       <div id="v71caution" class="v71-alert" hidden></div>
       <p class="v71-note">⚠️ <b>시초가 매도 수익률</b>=(다음 거래일 공식 시가/신호일 종가−1)×100 − 왕복 비용 가정 − 불리 체결 오차 가정으로 계산한 가상값입니다. 시초가 매도는 개장 시점의 시장가·지정가 주문이 공식 시가와 동일 가격에 체결된다는 보장이 없습니다. 갭 급변·호가 공백·거래정지·유동성 부족에서는 체결이 크게 달라질 수 있습니다. <b>종가 매수도 실제 체결을 가정</b>하며 개별 종목 주문 충격·세금·상장폐지·분할·실제 수수료 구조를 재현하지 못합니다. <b>시가→종가</b> 행은 다음 날 개장 후 새로 매수한 별개 가상 전략이며 O/A/B와 동일한 종가 매수 전략이 아닙니다. 일봉만으로 오전 10시 매도 가격은 알 수 없습니다. 오늘 생존한 종목만 과거에 포함하는 선택·생존 편향, 기간 경계에서의 보유기간 겹침, 중복 종목/날짜, 여러 조합을 사후 비교하는 과최적화 위험이 있습니다. 60/40 분할은 독립된 미래 검증이 아닙니다. <b>시장 확산도</b>는 분석 가능 종목의 최근 5일 상승 비율 대용지표입니다. 이 수치는 실전 수익이나 미래 상승 확률이 아닙니다.</p>
+    </section>
+
+    <section id="v73panel" class="v73-panel" aria-label="v7.3 시초가 매도 전략 위험 필터 검증">
+      <h3>🛡️ v7.3 시초가 매도 · 손실 위험 필터 실험</h3>
+      <p>v7.2에서 상대적으로 나았던 <b>종가 매수 → 다음 거래일 공식 시가 매도</b> 가정을 더 엄격하게 점검합니다.
+      신호일에 알 수 있는 값만으로 유동성·급등 필터를 적용하고, 필터 적용 전후를 <b>같은 평가기간·점수·시장</b>에서 비교합니다.</p>
+      <div class="v73-control-grid">
+        <label>평가 기간<select id="v73period"><option value="test" selected>최근 40% (기본)</option><option value="train">이전 60%</option><option value="all">전체 약 120거래일</option></select></label>
+        <label>점수<select id="v73score"><option value="80" selected>80점 이상</option><option value="100">100점</option><option value="60">60점 이상</option></select></label>
+        <label>시장<select id="v73market"><option value="ALL">코스피+코스닥</option><option value="KOSPI">코스피</option><option value="KOSDAQ">코스닥</option></select></label>
+        <label>최소 추정 거래대금<select id="v73liquid"><option value="0">제한 없음</option><option value="100000000">1억 원</option><option value="1000000000" selected>10억 원</option><option value="5000000000">50억 원</option><option value="10000000000">100억 원</option></select></label>
+        <label>신호일 전일 대비 상승률 상한<select id="v73rise"><option value="0">제외 없음</option><option value="5">+5% 이하</option><option value="10" selected>+10% 이하</option><option value="15">+15% 이하</option><option value="20">+20% 이하</option></select></label>
+        <label>왕복 비용<select id="v73cost"><option value="0">0%</option><option value="0.3" selected>0.3%p</option><option value="0.5">0.5%p</option></select></label>
+        <label>시초가 불리 체결 오차<select id="v73slip"><option value="0">0%p</option><option value="0.2" selected>0.2%p</option><option value="0.5">0.5%p</option><option value="1">1.0%p</option></select></label>
+      </div>
+      <div id="v73summary" class="v73-mini-summary" role="status" aria-live="polite">과거 구름대 신호를 평가하고 있습니다.</div>
+      <p class="v71-note">표는 좌우로 밀어서 봐줘. <b>원본 → 유동성만 → 급등 제외만 → 둘 다 적용</b>을 비교합니다. 통계는 종목·날짜별 중복 신호를 포함하며 가상의 공식 시가 매도입니다.</p>
+      <div id="v73table" class="v73-table-scroll"><p>검증 대기 중입니다.</p></div>
+      <div id="v73detail" class="v73-mini-summary">시그널일별 동일가중 바스켓 위험도를 계산하고 있습니다.</div>
+      <div id="v73warn" class="v73-warning">⚠️ 신호일 거래대금은 <b>종가×거래량</b>의 추정치이며 실제 거래대금이 아닙니다. 상한 필터는 신호일 종가로 계산합니다. 모든 수익률은 체결·세금·주문충격·상장폐지 보정이 불완전한 과거 실험입니다. 여러 필터를 사후 선택하면 우연히 좋아 보일 수 있습니다. 반드시 별도 미래 기간에서 재검증해야 합니다.</div>
     </section>
     <section class="v7-panel" id="v7failurehistory"><h3>⚠️ 구름 돌파 후 실패 추적</h3><p>분석 대기 중입니다.</p></section>
     <div class="v7-filters" aria-label="구름대 검색 필터">
@@ -1151,6 +1191,8 @@ function v7Compute(code,base,rows,marketCalendar){
     const o1=t1?Number(t1[1]):null,h1=t1?Number(t1[2]):null,
       l1=t1?Number(t1[3]):null,c1=t1?Number(t1[4]):null;
     testEvents.push({code,name:base.name,market:base.market,date:rows[e][0],score:sc.points,
+      signal_turnover_est:Number.isFinite(tClose*Number(rows[e][5]))&&tClose>0&&Number(rows[e][5])>=0?tClose*Number(rows[e][5]):null,
+      signal_change_pct:e>0&&rows[e-1][4]>0?pctPrice(tClose,Number(rows[e-1][4])):null,
       next_pct:nextPct,ret_1:forwardClose(1),ret_3:forwardClose(3),ret_5:forwardClose(5),
       next_intraday_pct:o1===null?null:pctPrice(c1,o1),
       next_gap_pct:o1===null?null:pctPrice(o1,tClose),
@@ -1319,6 +1361,103 @@ function v71Render(){
   alert.hidden=!notes.length;alert.textContent=notes.join(' ');
 }
 
+
+// v7.3: Exploratory risk-filter analysis, never a buy/sell signal.
+// Filters use ONLY signal-date inputs. Future official open is used solely to evaluate past signals.
+function v73Stats(events,cost,slip){
+  const rows=events.filter(e=>Number.isFinite(e.next_gap_pct));
+  const returns=rows.map(e=>e.next_gap_pct-cost-slip).sort((a,b)=>a-b);
+  const n=returns.length;
+  if(!n)return {n:0,mean:null,median:null,win:null,p10:null,trim5:null,removeTop5:null,
+    dates:0,maxDrawdown:null,maxLossStreak:null};
+  const mean=v71Average(returns),median=n%2?returns[(n-1)/2]:(returns[n/2-1]+returns[n/2])/2;
+  const k=n>=20?Math.floor(n*.05):0;
+  const trimmed=k?returns.slice(k,n-k):returns;
+  // Top-tail removal is a robustness stress test, not a tradable ex-ante filter.
+  const removeTop5=k?returns.slice(0,n-k):returns;
+  const days=new Map();
+  for(const e of rows){
+    const net=e.next_gap_pct-cost-slip;
+    let bucket=days.get(e.date);
+    if(!bucket){bucket={total:0,count:0};days.set(e.date,bucket);}
+    bucket.total+=net;bucket.count++;
+  }
+  // Equal-weight one-overnight basket for every signal DATE; dates with no signals are omitted.
+  let eq=1,peak=1,mdd=0,loss=0,longest=0;
+  for(const [date,basket] of [...days].sort((a,b)=>a[0].localeCompare(b[0]))){
+    const daily=basket.total/basket.count;
+    eq*=Math.max(0,1+daily/100);
+    peak=Math.max(peak,eq);
+    mdd=Math.max(mdd,peak>0?100*(peak-eq)/peak:100);
+    if(daily<0){loss++;longest=Math.max(longest,loss);}else{loss=0;}
+  }
+  return {n,mean,median,win:100*returns.filter(v=>v>0).length/n,
+    p10:returns[Math.floor((n-1)*.1)],trim5:v71Average(trimmed),removeTop5:v71Average(removeTop5),
+    dates:days.size,maxDrawdown:mdd,maxLossStreak:longest};
+}
+function v73Render(){
+  const summary=$('v73summary'),mount=$('v73table'),detail=$('v73detail'),warning=$('v73warn');
+  if(!summary||!mount||!detail)return;
+  if(!v71Cutoff||!v7Backtest.length){
+    summary.textContent='검증할 과거 데이터가 없습니다. v7 전체 종목 다시 분석을 실행해 주세요.';
+    mount.replaceChildren();detail.textContent='검증 데이터가 준비되지 않았습니다.';return;
+  }
+  const segment=$('v73period').value,score=Number($('v73score').value),market=$('v73market').value,
+    turnover=Number($('v73liquid').value),rise=Number($('v73rise').value),
+    cost=Number($('v73cost').value),slip=Number($('v73slip').value);
+  const baseline=v7Backtest.filter(e=>
+    e.score>=score&&(market==='ALL'||e.market===market)&&
+    (segment==='all'||(segment==='test'?e.date>=v71Cutoff:e.date<v71Cutoff)));
+  const liquidity=e=>Number.isFinite(e.signal_turnover_est)&&e.signal_turnover_est>=turnover;
+  const capped=e=>Number.isFinite(e.signal_change_pct)&&(rise===0||e.signal_change_pct<=rise);
+  const tests=[
+    ['원본 (필터 없음)',baseline],
+    ['유동성 기준만',baseline.filter(liquidity)],
+    ['급등 제한만',baseline.filter(capped)],
+    ['유동성 + 급등 제한',baseline.filter(e=>liquidity(e)&&capped(e))],
+  ];
+  const label=segment==='test'?`최근 40% (${v71Cutoff}~${v71End})`:
+    segment==='train'?`이전 60% (${v71TrainStart}~${v71Cutoff} 이전)`:
+    `전체 (${v71TrainStart}~${v71End})`;
+  summary.textContent=`📅 ${label} · ${score}점 이상 / ${market==='ALL'?'코스피·코스닥':market} · 기존 신호 ${fmt(baseline.length)}건 · 추정 거래대금 ${turnover===0?'제한 없음':fmt(turnover/1e8)+'억 원 이상'} · 전일대비 상승 ${rise===0?'제한 없음':'+'+rise+'% 이하'} · 비용 ${cost.toFixed(1)}%p + 불리 체결 ${slip.toFixed(1)}%p`;
+  const table=elem('table','v73-table'),thead=elem('thead'),hrow=elem('tr');
+  ['비교 대상','확인건','평균 순변화','순상승 비율','중앙값','하위 10%','양쪽 5% 제외 평균','상위 5% 제외 평균','바스켓 MDD'].forEach(name=>hrow.append(elem('th','',name)));
+  thead.append(hrow);table.append(thead);
+  const body=elem('tbody');
+  const result=[];
+  for(const [name,items] of tests){
+    const stat=v73Stats(items,cost,slip);result.push({name,items,stat});
+    const vals=[name,fmt(stat.n)+'건',v71Pct(stat.mean),stat.win===null?'—':stat.win.toFixed(1)+'%',
+      v71Pct(stat.median),v71Pct(stat.p10),v71Pct(stat.trim5),v71Pct(stat.removeTop5),stat.maxDrawdown===null?'—':stat.maxDrawdown.toFixed(2)+'%'];
+    const tr=elem('tr');
+    vals.forEach((val,i)=>{
+      const cell=elem('td','',val);
+      if(i===2&&stat.mean!==null)cell.classList.add(stat.mean>=0?'gain':'loss');
+      tr.append(cell);
+    });body.append(tr);
+  }
+  table.append(body);mount.replaceChildren(table);
+  const base=result[0].stat,filtered=result[3].stat;
+  if(!filtered.n){detail.textContent='선택한 두 필터를 모두 만족하는 과거 신호가 없습니다. 조건을 완화해 주세요.';}
+  else{
+    const gain=base.mean===null?null:filtered.mean-base.mean;
+    detail.replaceChildren();
+    detail.append(elem('strong','',`🛡️ 두 필터 적용: ${fmt(filtered.n)}건 / 원본 ${fmt(base.n)}건 · 평균 ${v71Pct(filtered.mean)} · 원본 대비 ${v71Pct(gain)}`));
+    detail.append(elem('div','',`중앙값 ${v71Pct(filtered.median)} · 양쪽 5% 제외 평균 ${v71Pct(filtered.trim5)} · 최대 상승 상위 5% 제거 시 ${v71Pct(filtered.removeTop5)}`));
+    detail.append(elem('div','',`신호 발생 ${fmt(filtered.dates)}일 · 동일가중 가상 바스켓 최대 낙폭 ${filtered.maxDrawdown.toFixed(2)}% · 연속 손실 신호일 최대 ${fmt(filtered.maxLossStreak)}일`));
+    detail.append(elem('small','',`※ 바스켓은 같은 신호일에 해당하는 모든 종목을 동일가중한 가상 결과로, 종목별 평균과 계산 단위가 다릅니다. 실제 거래 가능한 포트폴리오가 아닙니다.`));
+  }
+  const cautions=[];
+  if(filtered.n<30)cautions.push(`⚠️ 두 필터 모두 충족한 표본은 ${fmt(filtered.n)}건으로 30건 미만입니다.`);
+  if(filtered.dates<15)cautions.push(`⚠️ 서로 다른 신호일이 ${fmt(filtered.dates)}일뿐이라 우연한 특정 날짜 영향이 큽니다.`);
+  if(filtered.n>=20&&filtered.mean>0&&filtered.trim5<=0)cautions.push('⚠️ 평균은 양수이지만 극단적인 양쪽 5%를 제외하면 0% 이하입니다.');
+  if(filtered.n>=20&&filtered.mean>0&&filtered.removeTop5<=0)cautions.push('⚠️ 상위 5% 수익 사례를 제외하면 평균이 0% 이하입니다. 일부 대박 사례 의존 위험이 큽니다.');
+  if(segment==='all')cautions.push('전체 기간은 조건 발견에 이용된 기간까지 포함하므로 독립 검증이 아닙니다.');
+  if(segment==='test')cautions.push('최근 40% 기간도 이미 결과를 보고 필터를 고른 사후 검증입니다. 미래 미관측 데이터 검증이 필요합니다.');
+  cautions.push('추정 거래대금은 종가×거래량으로 계산합니다. 개장 동시호가 실제 매도 체결은 보장되지 않으며 미끄러짐·체결충격·분할·상장폐지 등 미반영 문제가 있습니다.');
+  warning.textContent=cautions.join(' ');
+}
+
 function v7Render(){
   const q=v6N($('v7query').value),state=$('v7signal').value;
   const market=$('v7market').value,thick=$('v7thickness').value,min=Number($('v7min').value);
@@ -1450,7 +1589,7 @@ async function v7Load(){
     warn.textContent=stale?`⚠️ 원본 확정 일봉이 기대 거래일 ${expected}보다 오래됐습니다. ${infoDate} 기준 과거 분석으로, 오늘 종가매매 판단에는 사용하지 마세요.`:
       '⚠️ 마감된 확정 일봉 데이터만 사용합니다. 장중 종목 자동 검색·실시간 시세가 아닙니다.';
     if(recordError.length){warn.textContent+=` 일부 구간 자료를 못 받았습니다 (${recordError.length}파일). 이때 검색·통계는 전체 시장이 아닌 부분 표본입니다.`;}
-    v7Stats();v7RenderTest();v71Render();v7Render();
+    v7Stats();v7RenderTest();v71Render();v73Render();v7Render();
   }catch(e){status.textContent='⚠️ 구름대 전체 분석 실패: '+e.message;}
   finally{v7Running=false;$('v7refresh').disabled=false;}
 }
@@ -1472,6 +1611,7 @@ function v6Switch(kind){
 $('v6refresh').addEventListener('click',v6Load);
 $('v7refresh').addEventListener('click',()=>{v7Clear();v7Load();});
 ['v71segment','v71market','v71breadth','v71cost','v72slip'].forEach(id=>$(id).addEventListener('change',v71Render));
+['v73period','v73score','v73market','v73liquid','v73rise','v73cost','v73slip'].forEach(id=>$(id).addEventListener('change',v73Render));
 v6Switch(['#v5','#v6','#v7'].includes(location.hash)?location.hash.slice(1):'v6');
 v6Load();
 
