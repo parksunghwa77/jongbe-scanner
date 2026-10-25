@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="theme-color" content="#f4f8ff">
-  <title>종베 스캐너 v7.3 · 시초가 매도 리스크 필터 검증</title>
+  <title>종베 스캐너 v7.3.1 · 종목 검색 수정</title>
   <style>
     :root{color-scheme:light}*{box-sizing:border-box}
     body{margin:0;background:#101827;color:#f3f6fe;font-family:system-ui,-apple-system,"Noto Sans KR",sans-serif}
@@ -247,7 +247,7 @@
   </style>
 </head>
 <body><main>
-  <h1 class="app-title">📈 종베 스캐너 <span>v7.3</span></h1>
+  <h1 class="app-title">📈 종베 스캐너 <span>v7.3.1</span></h1>
   <div class="status-pill">🔎 읽기 전용 · 투자 추천 아님</div>
   <nav class="switcher" aria-label="분석 화면 선택">
     <button id="tabv6" type="button" class="selected" aria-pressed="true">v6 장중 관찰</button>
@@ -352,7 +352,7 @@
     </section>
     <section class="v7-panel" id="v7failurehistory"><h3>⚠️ 구름 돌파 후 실패 추적</h3><p>분석 대기 중입니다.</p></section>
     <div class="v7-filters" aria-label="구름대 검색 필터">
-      <label class="v7-full">종목명·종목코드<input type="search" id="v7query" placeholder="예: 삼성전자, 005930"></label>
+      <label class="v7-full">종목명·종목코드<input type="search" id="v7query" placeholder="예: 삼성전자, 005930"><small>🔎 종목명을 입력하면 돌파 상태·점수·시장·구름 두께 조건과 관계없이 전체 분석 종목에서 검색합니다. 결과는 아래에 표시됩니다.</small></label>
       <label>돌파·실패 상태<select id="v7signal"><option value="today">오늘 상향 돌파</option><option value="recent">최근 5거래일 돌파</option><option value="failed">최근 20거래일 돌파 실패</option><option value="above">구름대 위</option><option value="thin">얇은 구름대</option><option value="all">전체 종목</option></select></label>
       <label>최소 100점 점수<select id="v7min"><option value="0" selected>전체</option><option value="40">40점 이상</option><option value="60">60점 이상</option><option value="80">80점 이상</option></select></label>
       <label>시장<select id="v7market"><option value="ALL">코스피+코스닥</option><option value="KOSPI">코스피</option><option value="KOSDAQ">코스닥</option></select></label>
@@ -1460,10 +1460,12 @@ function v73Render(){
 
 function v7Render(){
   const q=v6N($('v7query').value),state=$('v7signal').value;
+  const searching=q.length>0;
   const market=$('v7market').value,thick=$('v7thickness').value,min=Number($('v7min').value);
   const sorter=$('v7sort').value;
   const list=v7Results.filter(x=>{
-    if(q && !v6N(x.name).includes(q) && !v6N(x.code).includes(q))return false;
+    // 종목명 검색은 돌파·점수 등 조건과 별도로 실행합니다.
+    if(searching)return v6N(x.name).includes(q)||v6N(x.code).includes(q);
     if(market!=='ALL'&&x.market!==market)return false;
     if(thick!=='all'&&x.cloud_thickness_label!==thick)return false;
     if(x.score<min)return false;
@@ -1474,13 +1476,18 @@ function v7Render(){
     if(state==='thin'&&x.cloud_thickness_label!=='얇음')return false;
     return true;
   });
-  list.sort((a,b)=>sorter==='volume'?(b.volume_increase_pct??-1e10)-(a.volume_increase_pct??-1e10)||b.score-a.score:
+  if(searching){
+    const relevance=x=>{const name=v6N(x.name),code=v6N(x.code);return name===q||code===q?0:name.startsWith(q)||code.startsWith(q)?1:2;};
+    list.sort((a,b)=>relevance(a)-relevance(b)||b.score-a.score||String(a.code).localeCompare(String(b.code)));
+  }else{
+    list.sort((a,b)=>sorter==='volume'?(b.volume_increase_pct??-1e10)-(a.volume_increase_pct??-1e10)||b.score-a.score:
     sorter==='thin'?a.cloud_thickness_pct-b.cloud_thickness_pct||b.score-a.score:
     sorter==='recent'?(Number(b.breakout_today)-Number(a.breakout_today))||Number(b.recent_breakout)-Number(a.recent_breakout)||b.score-a.score:
     b.score-a.score||(b.volume_increase_pct??-1e10)-(a.volume_increase_pct??-1e10));
-  $('v7count').textContent=`${fmt(list.length)}종목 · 최대 30개 표시`;
+  }
+  $('v7count').textContent=searching?`🔎 ${fmt(list.length)}종목 검색됨 · 다른 조건 무시 · 최대 30개 표시`:`${fmt(list.length)}종목 · 최대 30개 표시`;
   const out=$('v7results');clearChartObservers('v7');out.replaceChildren();
-  if(!list.length){out.append(elem('p','v6-empty',v7Results.length?'조건을 만족하는 종목이 없습니다. 조건을 완화해 보세요.':'분석 결과가 아직 없습니다.'));return;}
+  if(!list.length){out.append(elem('p','v6-empty',searching?'현재 분석 종목에서 찾지 못했습니다. 코드나 종목명을 확인하거나 v5 탭에서 검색하세요.':v7Results.length?'조건을 만족하는 종목이 없습니다. 조건을 완화해 보세요.':'분석 결과가 아직 없습니다.'));return;}
   const frag=document.createDocumentFragment();
   for(const x of list.slice(0,30)){
     const card=elem('article','v7-stock');
