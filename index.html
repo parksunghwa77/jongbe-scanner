@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="theme-color" content="#f4f8ff">
-  <title>종베 스캐너 v7.3.3 · 돌파 실패 목록 숨김</title>
+  <title>종베 스캐너 v7.3.4 · v6 검색 버튼과 확정 일봉 조회</title>
   <style>
     :root{color-scheme:light}*{box-sizing:border-box}
     body{margin:0;background:#101827;color:#f3f6fe;font-family:system-ui,-apple-system,"Noto Sans KR",sans-serif}
@@ -76,7 +76,16 @@
     .v6-stat{border:1px solid #344968;background:#1c2940;border-radius:11px;padding:12px 8px;text-align:center}
     .v6-stat strong{display:block;font-size:22px;color:#83edbb}.v6-stat span{font-size:11px;color:#b3c7e4}
     .v6-tools{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin:16px 0 20px}
-    .v6-tools label{min-width:0}.v6-tools label:first-child{grid-column:1/-1}
+    .v6-tools label{min-width:0}
+    .v6-tools .v6-search-block{grid-column:1/-1;display:flex;flex-direction:column;gap:7px}
+    .v6-search-row{display:flex;gap:7px;flex-wrap:wrap;align-items:stretch}
+    .v6-search-row input{flex:1 1 120px;width:auto;min-width:120px;min-height:47px;background:white;color:#23405e;border:1px solid #adc2da;border-radius:10px}
+    .v6-search-row input::placeholder{color:#768aa0}
+    .v6-search-row button{min-height:47px;padding:9px 13px;font-size:14px}
+    #v6searchButton{background:#2f70db;color:white}
+    #v6clearButton{background:#e8edf5;color:#345575;border:1px solid #b9c9db}
+    .v6-search-tip{color:#416588;font-size:12px;line-height:1.65}
+    .v6-daily-tag{background:#fff0d9;color:#80521e;border:1px solid #dfb97c;font-weight:800}
     .v6-controls{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:13px 0}
     .v6-controls a{font-size:13px}
     .v6-card{border:1px solid #354966;background:#1b2940;border-radius:14px;padding:15px;margin:12px 0}
@@ -257,7 +266,7 @@
   </style>
 </head>
 <body><main>
-  <h1 class="app-title">📈 종베 스캐너 <span>v7.3.3</span></h1>
+  <h1 class="app-title">📈 종베 스캐너 <span>v7.3.4</span></h1>
   <div class="status-pill">🔎 읽기 전용 · 투자 추천 아님</div>
   <nav class="switcher" aria-label="분석 화면 선택">
     <button id="tabv6" type="button" class="selected" aria-pressed="true">v6 장중 관찰</button>
@@ -282,7 +291,15 @@
       <div class="v6-stat"><strong id="v6shown">–</strong><span>현재 표시</span></div>
     </div>
     <div class="v6-tools">
-      <label>이름 또는 종목코드 검색<input id="v6query" type="search" placeholder="삼성전자, 005930" autocomplete="off"></label>
+      <div class="v6-search-block">
+        <label for="v6query">이름 또는 종목코드 검색</label>
+        <form class="v6-search-row" id="v6searchForm" role="search">
+          <input id="v6query" type="search" placeholder="예: 삼성전자, 005930" autocomplete="off" enterkeyhint="search" aria-label="v6 종목명·종목코드">
+          <button id="v6searchButton" type="submit">🔎 검색</button>
+          <button id="v6clearButton" type="button">초기화</button>
+        </form>
+        <small class="v6-search-tip">장중 점수가 있으면 v6 결과를 보여줍니다. 없으면 해당 종목의 <b>과거 확정 일봉</b>을 별도 표시하며, 장중 점수로 표시하지 않습니다.</small>
+      </div>
       <label>최소 점수<select id="v6min"><option value="0">전체 점수</option><option value="40">40점 이상</option><option value="60" selected>60점 이상</option><option value="80">80점 이상</option><option value="100">100점</option></select></label>
       <label>위험 표시<select id="v6risk"><option value="safe" selected>급변 위험 제외</option><option value="all">전체 포함</option><option value="risk">급변 위험만</option></select></label>
     </div>
@@ -1019,25 +1036,58 @@ $('refresh').addEventListener('click',load);
 load();
 
 // v6.2 UI: public GitHub Contents API (scores only); no API keys/stock quotations in the browser.
-let v6Rows=[],v6Loaded=null;
+let v6Rows=[],v6Loaded=null,v6SubmittedQuery='';
 function v6N(s){return String(s??'').normalize('NFKC').toLowerCase().replace(/\s+/g,'');}
 function v6Entry(s){const x=Number(s);return Number.isFinite(x)?x:null;}
 function v6Clock(dateString){try{return new Date(dateString).toLocaleString('ko-KR',{timeZone:'Asia/Seoul',year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'});}catch{return '-';}}
 function v6KstDate(){return new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Seoul',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());}
 function v6El(t,c,s){let e=document.createElement(t);if(c)e.className=c;if(s!==undefined)e.textContent=String(s);return e;}
 function v6Render(){
-  const q=v6N(document.getElementById('v6query').value);
-  const min=Number(document.getElementById('v6min').value);
-  const risk=document.getElementById('v6risk').value;
+  const q=v6N(v6SubmittedQuery);
+  const min=Number($('v6min').value);
+  const risk=$('v6risk').value;
   const list=v6Rows.filter(x=>{
-    if(q){return v6N(x.code).includes(q)||v6N(x.name).includes(q);}
+    if(q)return v6N(x.code).includes(q)||v6N(x.name).includes(q);
     return Number(x.score)>=min && (risk==='all'||(risk==='risk'? Boolean(x.caution): !x.caution));
   }).sort((a,b)=>Number(b.score)-Number(a.score)||String(a.code).localeCompare(String(b.code)));
-  const parent=document.getElementById('v6results');clearChartObservers('v6');parent.replaceChildren();
-  document.getElementById('v6shown').textContent=String(list.length);
-  document.getElementById('v6counter').textContent='검색 '+list.length+'개';
-  if(!v6Loaded){parent.append(v6El('p','v6-empty','아직 게시된 v6 장중 분석 점수가 없습니다. 평일 장중 GitHub Actions 실행 결과를 확인하세요.'));return;}
-  if(!list.length){parent.append(v6El('p','v6-empty',q?'검색된 종목이 없습니다. (현재 v6는 최대 55종목만 분석합니다.)':'조건을 만족하는 종목이 없습니다. 점수·위험 필터를 완화해 보세요.'));return;}
+  const parent=$('v6results');clearChartObservers('v6');parent.replaceChildren();
+
+  // The v6 afternoon API only publishes scores for a subset (up to 55 stocks).
+  // Historical EOD lookup is a clearly labeled fallback, NEVER an intraday v6 score.
+  if(q && !list.length){
+    const fallback=dataRows.filter(x=>v6N(x.name).includes(q)||v6N(x.code).includes(q))
+      .sort((a,b)=>{
+        const rank=x=>v6N(x.code)===q||v6N(x.name)===q?0:v6N(x.name).startsWith(q)||v6N(x.code).startsWith(q)?1:2;
+        return rank(a)-rank(b)||Number(b.score)-Number(a.score);
+      }).slice(0,20);
+    $('v6shown').textContent=fmt(fallback.length);
+    $('v6counter').textContent=`v6 장중 점수 0개 · 과거 일봉 ${fmt(fallback.length)}개`;
+    if(!fallback.length){
+      parent.append(v6El('p','v6-empty',dataRows.length?
+        '검색한 종목을 찾지 못했어요. 이름·종목코드를 확인해 주세요. v5·v7에서도 검색할 수 있어요.':
+        '아직 게시된 v6 점수가 없고, 과거 확정 일봉도 불러오지 못했습니다. v5 새로고침 및 GitHub Actions 상태를 확인해 주세요.'));
+      return;
+    }
+    parent.append(v6El('p','v6-empty',`📅 과거 확정 일봉 ${infoDate||'기준일 미확인'} 기준 ${fmt(fallback.length)}종목입니다. v6 장중 점수가 아닙니다. 나무증권 장중 점수는 평일 14:30 작업에 성공한 뒤 별도로 표시됩니다.`));
+    for(const x of fallback){
+      const card=v6El('article','v6-card');
+      const head=v6El('div','v6-card-top');
+      const btn=companyNameButton(x);
+      head.append(btn,v6El('span','v6-tag v6-daily-tag','📅 과거 확정 일봉'));
+      card.append(head,v6El('p','v6-inline',`종목 ${x.code} · 일봉 기준일 ${x.date||infoDate||'-'} · 확정 종가 ${fmt(x.price)}원 · 일봉 점수 ${x.score}점 (v6 장중 점수 아님)`));
+      const trendDiv=v6El('div','trend-inline','확정 일봉 추세: ');
+      trendDiv.append(trendChip(x));card.append(trendDiv);
+      const companyPanel=addCompanyPanel(card,x);
+      addChartInline(card,x.code,'v6');
+      btn.addEventListener('click',()=>{companyPanel.open=!companyPanel.open;});
+      parent.append(card);
+    }
+    return;
+  }
+  $('v6shown').textContent=fmt(list.length);
+  $('v6counter').textContent=`v6 장중 점수 ${fmt(list.length)}개`;
+  if(!v6Loaded){parent.append(v6El('p','v6-empty','아직 게시된 v6 장중 분석 점수가 없습니다. 평일 오후 2시 30분 이후 별도의 v6 GitHub Actions 실행 결과를 확인하세요.'));return;}
+  if(!list.length){parent.append(v6El('p','v6-empty','조건을 만족하는 v6 종목이 없습니다. 점수·위험 필터를 완화해 보세요.'));return;}
   for(const x of list.slice(0,100)){
     const card=v6El('article','v6-card');const head=v6El('div','v6-card-top');
     const v6Btn=companyNameButton(x);
@@ -1081,7 +1131,7 @@ async function v6Load(){
     v6Rows=[];v6Loaded=null;
     document.getElementById('v6count').textContent='–';document.getElementById('v6pass').textContent='–';
     document.getElementById('v6status').textContent='아직 표시할 v6 점수가 없습니다: '+e.message;
-    document.getElementById('v6fresh').textContent='⚠️ v6.1은 동작하지만 장중 점수를 웹에 공개하려면 제공된 v6.2 워크플로를 설치하고 실제 거래일 장중에 성공 실행해야 합니다. 기존 v5 데이터는 오른쪽 탭에서 확인할 수 있습니다.';
+    document.getElementById('v6fresh').textContent='⚠️ v6 장중 점수는 평일 오후 2시 30분 별도의 NH증권 API 워크플로가 성공해 파일을 게시해야 나타납니다. 검색창에서는 과거 확정 일봉을 조회할 수 있지만 장중 시세가 아닙니다.';
   }finally{btn.disabled=false;v6Render();}
 }
 // v7.2 cloud lab: confirmed public OHLCV only; no API keys, no intraday prices.
@@ -1622,7 +1672,17 @@ function v6Switch(kind){
   if(kind==='v7')v7Load();
 }
 ['v5','v6','v7'].forEach(t=>$('tab'+t).addEventListener('click',()=>v6Switch(t)));
-['v6query','v6min','v6risk'].forEach(id=>$(id).addEventListener(id==='v6query'?'input':'change',v6Render));
+$('v6searchForm').addEventListener('submit',event=>{
+  event.preventDefault();
+  v6SubmittedQuery=$('v6query').value.trim();
+  $('v6query').blur();
+  v6Render();
+  $('v6results').scrollIntoView({behavior:'smooth',block:'start'});
+});
+$('v6clearButton').addEventListener('click',()=>{
+  $('v6query').value='';v6SubmittedQuery='';$('v6query').blur();v6Render();
+});
+['v6min','v6risk'].forEach(id=>$(id).addEventListener('change',v6Render));
 ['v7signal','v7min','v7market','v7thickness','v7sort'].forEach(id=>
   $(id).addEventListener('change',v7Render));
 function v7RunNamedSearch(){
