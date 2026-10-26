@@ -1,0 +1,342 @@
+{
+  "schema": "jongbe-v6-performance-history-v1",
+  "description": "First afternoon derived-score snapshot per KRX session, no raw quotes or credentials; timestamp is workflow time, not tick time.",
+  "snapshots": [
+    {
+      "session_date": "2026-10-26",
+      "generated_kst": "2026-10-26 14:58 KST",
+      "rows": [
+        {
+          "code": "064400",
+          "name": "LG씨엔에스",
+          "score": 100,
+          "caution": ""
+        },
+        {
+          "code": "005870",
+          "name": "휴니드",
+          "score": 90,
+          "caution": ""
+        },
+        {
+          "code": "340360",
+          "name": "다보링크",
+          "score": 90,
+          "caution": ""
+        },
+        {
+          "code": "026910",
+          "name": "광진실업",
+          "score": 80,
+          "caution": ""
+        },
+        {
+          "code": "000660",
+          "name": "SK하이닉스",
+          "score": 70,
+          "caution": ""
+        },
+        {
+          "code": "009150",
+          "name": "삼성전기",
+          "score": 70,
+          "caution": ""
+        },
+        {
+          "code": "006400",
+          "name": "삼성SDI",
+          "score": 70,
+          "caution": ""
+        },
+        {
+          "code": "035420",
+          "name": "NAVER",
+          "score": 70,
+          "caution": ""
+        },
+        {
+          "code": "008350",
+          "name": "남선알미늄",
+          "score": 65,
+          "caution": ""
+        },
+        {
+          "code": "373200",
+          "name": "엑스플러스",
+          "score": 65,
+          "caution": ""
+        },
+        {
+          "code": "393210",
+          "name": "토마토시스템",
+          "score": 60,
+          "caution": ""
+        },
+        {
+          "code": "142210",
+          "name": "유니트론텍",
+          "score": 60,
+          "caution": ""
+        },
+        {
+          "code": "048530",
+          "name": "인트론바이오",
+          "score": 60,
+          "caution": ""
+        },
+        {
+          "code": "137940",
+          "name": "넥스트아이",
+          "score": 55,
+          "caution": ""
+        },
+        {
+          "code": "361670",
+          "name": "삼영에스앤씨",
+          "score": 55,
+          "caution": ""
+        },
+        {
+          "code": "219130",
+          "name": "타이거일렉",
+          "score": 50,
+          "caution": ""
+        },
+        {
+          "code": "225220",
+          "name": "제놀루션",
+          "score": 50,
+          "caution": ""
+        },
+        {
+          "code": "005930",
+          "name": "삼성전자",
+          "score": 45,
+          "caution": ""
+        },
+        {
+          "code": "105560",
+          "name": "KB금융",
+          "score": 45,
+          "caution": ""
+        },
+        {
+          "code": "042700",
+          "name": "한미반도체",
+          "score": 45,
+          "caution": ""
+        },
+        {
+          "code": "403870",
+          "name": "HPSP",
+          "score": 45,
+          "caution": ""
+        },
+        {
+          "code": "240810",
+          "name": "원익IPS",
+          "score": 45,
+          "caution": ""
+        },
+        {
+          "code": "253590",
+          "name": "네오셈",
+          "score": 35,
+          "caution": ""
+        },
+        {
+          "code": "095610",
+          "name": "테스",
+          "score": 35,
+          "caution": ""
+        },
+        {
+          "code": "484120",
+          "name": "도우인시스",
+          "score": 35,
+          "caution": ""
+        },
+        {
+          "code": "077500",
+          "name": "유니퀘스트",
+          "score": 35,
+          "caution": ""
+        },
+        {
+          "code": "300080",
+          "name": "플리토",
+          "score": 35,
+          "caution": ""
+        },
+        {
+          "code": "340450",
+          "name": "지씨지놈",
+          "score": 35,
+          "caution": ""
+        },
+        {
+          "code": "024740",
+          "name": "한일단조",
+          "score": 35,
+          "caution": ""
+        },
+        {
+          "code": "011330",
+          "name": "유니켐",
+          "score": 35,
+          "caution": ""
+        },
+        {
+          "code": "012030",
+          "name": "DB",
+          "score": 35,
+          "caution": ""
+        },
+        {
+          "code": "323350",
+          "name": "다원넥스뷰",
+          "score": 35,
+          "caution": ""
+        },
+        {
+          "code": "088280",
+          "name": "쏘닉스",
+          "score": 35,
+          "caution": ""
+        },
+        {
+          "code": "001780",
+          "name": "알루코",
+          "score": 35,
+          "caution": ""
+        },
+        {
+          "code": "206560",
+          "name": "덱스터",
+          "score": 35,
+          "caution": ""
+        },
+        {
+          "code": "460870",
+          "name": "에스엠씨지",
+          "score": 35,
+          "caution": ""
+        },
+        {
+          "code": "013580",
+          "name": "계룡건설",
+          "score": 25,
+          "caution": ""
+        },
+        {
+          "code": "084110",
+          "name": "휴온스글로벌",
+          "score": 25,
+          "caution": ""
+        },
+        {
+          "code": "007310",
+          "name": "오뚜기",
+          "score": 25,
+          "caution": ""
+        },
+        {
+          "code": "005500",
+          "name": "삼진제약",
+          "score": 25,
+          "caution": ""
+        },
+        {
+          "code": "200670",
+          "name": "휴메딕스",
+          "score": 25,
+          "caution": ""
+        },
+        {
+          "code": "043370",
+          "name": "피에이치에이",
+          "score": 25,
+          "caution": ""
+        },
+        {
+          "code": "360350",
+          "name": "코셈",
+          "score": 25,
+          "caution": ""
+        },
+        {
+          "code": "010660",
+          "name": "화천기계",
+          "score": 25,
+          "caution": ""
+        },
+        {
+          "code": "058400",
+          "name": "KNN",
+          "score": 25,
+          "caution": ""
+        },
+        {
+          "code": "046310",
+          "name": "백금T&A",
+          "score": 25,
+          "caution": ""
+        },
+        {
+          "code": "417310",
+          "name": "코람코더원리츠",
+          "score": 25,
+          "caution": ""
+        },
+        {
+          "code": "219750",
+          "name": "한국비티비",
+          "score": 25,
+          "caution": ""
+        },
+        {
+          "code": "441270",
+          "name": "파인엠텍",
+          "score": 20,
+          "caution": ""
+        },
+        {
+          "code": "126340",
+          "name": "비나텍",
+          "score": 20,
+          "caution": ""
+        },
+        {
+          "code": "089890",
+          "name": "코세스",
+          "score": 20,
+          "caution": "급변 위험"
+        },
+        {
+          "code": "065450",
+          "name": "빅텍",
+          "score": 20,
+          "caution": "급변 위험"
+        },
+        {
+          "code": "354320",
+          "name": "알멕",
+          "score": 10,
+          "caution": "급변 위험"
+        },
+        {
+          "code": "003010",
+          "name": "혜인",
+          "score": 10,
+          "caution": "급변 위험"
+        },
+        {
+          "code": "078520",
+          "name": "에이블씨엔씨",
+          "score": 10,
+          "caution": ""
+        }
+      ]
+    }
+  ]
+}
