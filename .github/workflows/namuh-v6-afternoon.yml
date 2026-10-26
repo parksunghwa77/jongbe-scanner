@@ -1,4 +1,4 @@
-name: 종베 스캐너 v6.2 - 오후 2시 30분 관심종목 관찰
+name: 종베 스캐너 v6.3 - 장중 관찰 및 사후 기록
 
 # 기존 scanner.yml / GitHub Pages 배포에는 영향 없음.
 on:
@@ -248,6 +248,95 @@ jobs:
                   print(text)
 
 
+          def persist_v6_history(token, repo, previous, current):
+              """Preserve first published valid afternoon snapshot per day, derived scores only."""
+              import base64
+              from urllib.request import Request, urlopen
+              from urllib.error import HTTPError
+
+              def normalise(doc):
+                  if not isinstance(doc, dict) or doc.get("schema") != "jongbe-v6.2-public-scores":
+                      return None
+                  date_s = str(doc.get("session_date", ""))
+                  if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", date_s):
+                      return None
+                  rows = doc.get("rows")
+                  if not isinstance(rows, list):
+                      return None
+                  safe = []
+                  for row in rows[:55]:
+                      if not isinstance(row, dict):
+                          continue
+                      code = str(row.get("code", ""))
+                      score = row.get("score")
+                      if not re.fullmatch(r"\d{6}", code) or type(score) is not int or not 0 <= score <= 100:
+                          continue
+                      safe.append({"code": code, "name": str(row.get("name", code))[:24],
+                                   "score": score, "caution": str(row.get("caution", ""))[:40]})
+                  if not safe:
+                      return None
+                  return {"session_date": date_s,
+                          "generated_kst": str(doc.get("generated_kst", ""))[:35],
+                          "rows": safe}
+
+              endpoint = f"https://api.github.com/repos/{repo}/contents/v6-history.json"
+              headers = {
+                  "Authorization": f"Bearer {token}",
+                  "Accept": "application/vnd.github+json",
+                  "User-Agent": "jongbe-v6.3-scores-history",
+                  "X-GitHub-Api-Version": "2022-11-28",
+              }
+              existing_sha = None
+              history = []
+              try:
+                  with urlopen(Request(endpoint + "?ref=main", headers=headers), timeout=15) as f:
+                      response = json.load(f)
+                  existing_sha = response.get("sha")
+                  decoded = base64.b64decode(response.get("content", ""))
+                  data = json.loads(decoded.decode("utf-8"))
+                  if data.get("schema") != "jongbe-v6-performance-history-v1" or not isinstance(data.get("snapshots"), list):
+                      raise RuntimeError("기존 v6-history.json 형식이 맞지 않습니다. 기록을 덮어쓰지 않았습니다.")
+                  history = data["snapshots"]
+              except HTTPError as e:
+                  if e.code != 404:
+                      raise RuntimeError(f"기록 조회 실패 (HTTP {e.code})") from None
+
+              by_date = {}
+              for raw in list(history) + [previous, current]:
+                  # Existing history snapshots already have a different schema at the top level.
+                  if raw is None:
+                      continue
+                  candidate = normalise(raw)
+                  if candidate is None and isinstance(raw, dict) and "session_date" in raw and "rows" in raw:
+                      candidate = normalise({**raw, "schema": "jongbe-v6.2-public-scores"})
+                  if not candidate:
+                      continue
+                  date_s = candidate["session_date"]
+                  # One immutable first successful snapshot per trade date; later re-runs must not replace it.
+                  if date_s not in by_date or candidate["generated_kst"] < by_date[date_s]["generated_kst"]:
+                      by_date[date_s] = candidate
+              dates = sorted(by_date)[-120:]
+              doc = {"schema": "jongbe-v6-performance-history-v1",
+                     "description": "First afternoon derived-score snapshot per KRX session, no raw quotes or credentials; timestamp is workflow time, not tick time.",
+                     "snapshots": [by_date[x] for x in dates]}
+              body = {
+                  "message": "data: archive v6 derived-score observation snapshot",
+                  "branch": "main",
+                  "content": base64.b64encode((json.dumps(doc, ensure_ascii=False, indent=2) + "\n").encode("utf-8")).decode("ascii"),
+              }
+              if existing_sha:
+                  body["sha"] = existing_sha
+              req = Request(endpoint, data=json.dumps(body).encode("utf-8"),
+                            headers={**headers, "Content-Type": "application/json"}, method="PUT")
+              try:
+                  with urlopen(req, timeout=25) as f:
+                      if f.status not in (200, 201):
+                          raise RuntimeError("점수 기록 GitHub 저장 실패")
+              except HTTPError as e:
+                  raise RuntimeError(f"점수 기록 GitHub 저장 실패 (HTTP {e.code})") from None
+              print(f"PASS: 날짜별 점수 기록 {len(dates)}일 저장 (가격·인증키 비게시)")
+
+
           def publish_public_scores(now, rows, source, requested, quoted):
               """Write only *derived* scores to public GitHub, NEVER prices/volumes/tokens.
 
@@ -287,10 +376,16 @@ jobs:
                   "X-GitHub-Api-Version": "2022-11-28",
               }
               sha = None
+              previous = None
               try:
                   get = Request(endpoint + "?ref=main", headers=headers)
                   with urlopen(get, timeout=15) as f:
-                      sha = json.load(f).get("sha")
+                      existing = json.load(f)
+                  sha = existing.get("sha")
+                  try:
+                      previous = json.loads(base64.b64decode(existing.get("content", "")).decode("utf-8"))
+                  except (ValueError, TypeError, UnicodeError):
+                      previous = None
               except HTTPError as e:
                   if e.code != 404:
                       raise RuntimeError(f"GitHub score file metadata check failed (HTTP {e.code})") from None
@@ -311,6 +406,7 @@ jobs:
                       raise RuntimeError("GitHub score update returned non-success status")
               except HTTPError as e:
                   raise RuntimeError(f"GitHub score update failed (HTTP {e.code})") from None
+              persist_v6_history(token, repo, previous, doc)
 
 
           def main():
