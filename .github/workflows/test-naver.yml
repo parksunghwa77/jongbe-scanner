@@ -22,4 +22,5 @@ jobs:
         run: pip install finance-datareader pandas requests
 
       - name: Test Naver stock data
-        run: python test_naver_100.py
+        run: python test_naver_crosscheck.py
+  
