@@ -210,6 +210,27 @@ def analyze(df: pd.DataFrame, now: dt.datetime) -> dict:
     change = ((latest['종가']/prev_close - 1)*100).replace([float('inf'),float('-inf')],0).fillna(0)
     score = ((latest['종가']>ma5).astype(int)*25+(ma5>ma20).astype(int)*25
              +(ratio>=1.5).astype(int)*20+(pos>=75).astype(int)*20+(change>0).astype(int)*10)
+    # v8.4: v5 상승 적합도와 독립적인 과열/급락 경계 지표 (0~100점).
+    # 당일 기준 확정 일봉과 그 이전 데이터만 사용. 미래 급락 확률이나 검증된 모델이 아님.
+    now_close = latest['종가'].astype(float)
+    rise5 = (now_close / close.iloc[:, -6] - 1.0) * 100.0
+    rise20 = (now_close / close.iloc[:, -21] - 1.0) * 100.0
+    deviation20 = (now_close / ma20.where(ma20 > 0) - 1.0) * 100.0
+
+    def overheat_band(series, bands):
+        points = pd.Series(0, index=latest.index, dtype=int)
+        for threshold, value in bands:   # weak to strong: later threshold overrides
+            points = points.mask(series >= threshold, value)
+        return points
+
+    risk_20d = overheat_band(rise20, [(10, 8), (18, 15), (30, 25)])
+    risk_5d = overheat_band(rise5, [(6, 6), (10, 12), (18, 20)])
+    risk_vol = overheat_band(ratio, [(2, 6), (3, 12), (5, 20)])
+    risk_dev = overheat_band(deviation20, [(8, 6), (15, 12), (25, 20)])
+    risk_day = overheat_band(change, [(7, 5), (12, 10), (20, 15)])
+    risk_score = (risk_20d + risk_5d + risk_vol + risk_dev + risk_day).clip(0, 100).astype(int)
+    risk_level = pd.Series('low', index=latest.index)
+    risk_level = risk_level.mask(risk_score >= 35, 'medium').mask(risk_score >= 60, 'high')
     rows=[]
     for code in latest.index:
         r=latest.loc[code]
@@ -227,6 +248,22 @@ def analyze(df: pd.DataFrame, now: dt.datetime) -> dict:
             'ma200_slope_5d_pct':round(float(slope200.loc[code]),3) if pd.notna(slope200.loc[code]) else None,
             'trend':trend_codes[code], 'trend_reason':trend_reasons[code],
             'score':int(score.loc[code]),
+            'risk_score':int(risk_score.loc[code]),
+            'risk_level':str(risk_level.loc[code]),
+            'risk_metrics':{
+                'rise5':round(float(rise5.loc[code]),1),
+                'rise20':round(float(rise20.loc[code]),1),
+                'deviation20':round(float(deviation20.loc[code]),1),
+                'volume_ratio':round(float(ratio.loc[code]),2),
+                'change':round(float(change.loc[code]),2)
+            },
+            'risk_parts':{
+                'rise5':int(risk_5d.loc[code]),
+                'rise20':int(risk_20d.loc[code]),
+                'deviation20':int(risk_dev.loc[code]),
+                'volume':int(risk_vol.loc[code]),
+                'day':int(risk_day.loc[code])
+            },
             'watch':bool(score.loc[code]>=70 and float(r['거래대금'])>=1e10 and 0<float(change.loc[code])<=15 and float(pos.loc[code])>=60),
             'chase_risk':bool(float(change.loc[code])>=15)
         })
@@ -236,6 +273,7 @@ def analyze(df: pd.DataFrame, now: dt.datetime) -> dict:
         'backtest':backtest,
         'asof':latest_date,'updated':now.strftime('%Y-%m-%d %H:%M KST'),
         'version':5, 'minor_version':'5.0', 'source':'FinanceData/marcap',
+        'risk_schema':'jongbe-v5-overheat-v1', 'risk_thresholds':{'medium':35,'high':60},
         'universe_size':int(len(latest)),
         'ma200_count':int(ma200.notna().sum()),
         'ma_alignment_count':int(ma_aligned.sum()),

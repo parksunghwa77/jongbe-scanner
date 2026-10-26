@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="theme-color" content="#f4f8ff">
-  <title>종베 스캐너 v8.3 · v6 장중 신호 사후 검증</title>
+  <title>종베 스캐너 v8.4 · v5 과열·급락 경계 지표</title>
   <style>
     :root{color-scheme:light}*{box-sizing:border-box}
     body{margin:0;background:#101827;color:#f3f6fe;font-family:system-ui,-apple-system,"Noto Sans KR",sans-serif}
@@ -35,6 +35,14 @@
     .history{width:100%;border-collapse:collapse;font-size:12px;margin-top:11px}
     .history th,.history td{border-bottom:1px solid #36475e;padding:8px 3px;text-align:left}
     .alertpill{font-size:11px;background:#66412a;color:#ffe7ba;border-radius:5px;padding:3px 6px;margin-left:6px}
+    .riskpill{display:inline-block;font-size:12px;font-weight:800;padding:4px 7px;border-radius:7px;margin:4px 0 0 6px}
+    .riskpill.high{background:#ffe0dc;color:#952d26;border:1px solid #d46e69}
+    .riskpill.medium{background:#fff0d5;color:#8a5100;border:1px solid #d3a353}
+    .riskpill.low{background:#e2f4eb;color:#176d4e;border:1px solid #74b79d}
+    .riskpill.unavailable{background:#e4e9f0;color:#4c5b70;border:1px solid #9faebf}
+    .risk-explain{margin:10px 0 0;padding:8px 10px;border:1px solid #bdcde0;border-radius:9px;font-size:12px;color:#415671;line-height:1.7}
+    .risk-explain summary{cursor:pointer;font-weight:750}
+    .risk-explain p{font-size:12px;margin:7px 0;color:inherit}
     .goldenpill{font-size:11px;background:#225343;color:#beffde;border-radius:5px;padding:3px 6px;margin-left:6px}
     .trend-legend{background:#162237;border:1px solid #3a4c66;border-radius:13px;padding:15px;margin:16px 0}
     .trend-legend h3{font-size:16px;margin:0 0 10px}
@@ -349,7 +357,7 @@
 </style>
 </head>
 <body><main>
-  <h1 class="app-title">📈 종베 스캐너 <span>v8.3</span></h1>
+  <h1 class="app-title">📈 종베 스캐너 <span>v8.4</span></h1>
   <div class="status-pill">🔎 읽기 전용 · 투자 추천 아님</div>
   <nav class="switcher" aria-label="분석 화면 선택">
     <button id="tabv6" type="button" class="selected" aria-pressed="true">v6 장중 관찰</button>
@@ -538,6 +546,7 @@
     <h2>확정 일봉 전종목 · 정배열·골든크로스·추세 색상 검색</h2>
   <div class="badge">⚠️ 장 마감 후 확정 일봉 · 실시간 아님</div>
   <p>코스피·코스닥 공개 일봉을 평가하고 과거 후보의 다음 거래일 변화를 함께 검증합니다. <b>점수는 상승 확률이나 매수 추천이 아닙니다.</b></p>
+  <p class="chart-caption">🛡️ <b>v8.4 과열·급락 경계 지표:</b> 기존 상승 적합도 100점은 유지하고, 별도 위험 점수(0~100)를 보여줍니다. 🔴 60점 이상: 과열 경계 · 🟠 35~59점: 과열 주의 · 🟢 0~34점: 과열 낮음. <b>급락 확률이 아니며, 낮음이어도 급락할 수 있습니다.</b> 기준일이 과거라면 현재 상황에 적용하면 안 됩니다.</p>
   <p class="chart-caption">📈 <b>각 종목 카드에 주가 차트가 자동으로 보입니다.</b> 확정 1일봉과 일목균형표 구름대(표시·숨기기), 두 손가락 확대·축소, 밝은 화면을 지원합니다. 스크롤하면 차트가 자동 로딩됩니다. 🏢 회사 이름을 누르면 기업 기본정보가 열립니다. 차트에는 5·20·200일선, 일목 구름대(9·26·52, 26거래일 선행), 거래량, 최근 20거래일 지지·저항 참고선과 종가 돌파 표시가 있습니다. 실시간 시세가 아닙니다.</p>
   <div class="bar"><button id="refresh" type="button">결과 새로고침</button><small>평일 18:15 및 월~토 09:30(KST) 재확인 예약 · 지연/실패 가능</small></div>
   <div class="meta" id="status" role="status" aria-live="polite">분석 데이터 확인 중...</div>
@@ -562,6 +571,7 @@
     <label>시장<select id="market"><option value="ALL">코스피 + 코스닥</option><option value="KOSPI">코스피</option><option value="KOSDAQ">코스닥</option></select></label>
     <label>이동평균 조건<select id="mafilter"><option value="all">전체 (제한 없음)</option><option value="aligned">정배열 (5일 &gt; 20일 &gt; 200일)</option><option value="golden">오늘 5·20일 골든크로스</option><option value="both">정배열 + 오늘 골든크로스</option></select></label>
     <label>추세 색상별 보기<select id="trendfilter"><option value="all">🎨 전체 추세</option><option value="strong_up">🟢 강한 상승</option><option value="rising">🔵 상승 시도</option><option value="sideways">🟡 횡보·혼조</option><option value="falling">🟠 하락 경계</option><option value="strong_down">🔴 강한 하락</option><option value="unavailable">⚪ 자료 미갱신</option></select></label>
+    <label>과열·급락 경계<select id="riskfilter"><option value="all" selected>전체 위험</option><option value="nohigh">🔴 높은 위험 제외</option><option value="low">🟢 낮음만</option><option value="medium">🟠 주의만</option><option value="high">🔴 높음만</option></select></label>
     <label>최소 점수<select id="minscore"><option value="0">0점 이상</option><option value="40" selected>40점 이상</option><option value="60">60점 이상</option><option value="80">80점 이상</option></select></label>
     <label>최소 거래대금<select id="minvalue"><option value="0">제한 없음</option><option value="30">30억 원</option><option value="50" selected>50억 원</option><option value="100">100억 원</option><option value="300">300억 원</option><option value="500">500억 원</option><option value="1000">1,000억 원</option></select></label>
     <label>등락 조건<select id="change"><option value="up" selected>상승 종목만</option><option value="all">전체</option></select></label>
@@ -571,7 +581,7 @@
   <div class="titlebar"><h2>조건 검색 결과</h2><small id="counter">0개</small></div>
   <section id="results" aria-label="종목 검색 결과"></section>
   <div class="pager"><button id="more" type="button" hidden>20개 더 보기</button></div>
-  <p class="rules">차트는 자동 표시되고 회사명을 누르면 기본정보가 열립니다. 업종·대표·제품 정보는 KIND 접속이 가능할 때만 표시하며, 미수집 정보는 추정하지 않습니다. 개별 일봉 차트는 공개 마감 데이터만 사용하며 1년 기준 약 252거래일을 표시합니다. G=골든크로스, D=데드크로스, 20/200=각 이동평균선 상향 돌파입니다. 이들은 확정 일봉의 과거 발생 지점이며 매수 신호가 아닙니다. <b>차트는 현재 v5 확정 일봉 데이터이며 v6 장중 시세와 다른 기준일일 수 있습니다.</b> 점수 기준: 종가&gt;5일 평균선 +25점, 5일선&gt;20일선 +25점, 거래량&gt;이전 20거래일 평균의 1.5배 +20점, 당일 고저가 대비 종가 위치≥75% +20점, 당일 등락률 양수 +10점. 최대 100점. <b>거래대금은 KRX에서 제공한 실제 누적 거래대금</b>을 사용합니다. 거래정지·신규 상장 등 최근 55거래일 자료가 불완전한 종목은 점수 계산에서 제외합니다. 200일선은 200거래일, 200일선 기울기는 205거래일의 종가가 확보되어야 표시됩니다. 부족하면 ‘자료 부족’으로 나타납니다. <b>정배열: 5일선 &gt; 20일선 &gt; 200일선, 오늘 골든크로스: 전 거래일 5일선 ≤ 20일선이면서 당일 5일선 &gt; 20일선.</b> 색상별 추세 판정은 20·200일선의 5거래일 변화와 이평 배치를 이용한 규칙 분류입니다. 기간 및 변화율 기준에 따라 결과는 달라질 수 있으며 강한 상승/하락, 상승 시도/하락 경계 모두 예측이나 매매 신호가 아닙니다. 거래일별 종가를 이용한 판정이며 필터 적용은 기존 점수 계산 기준을 변경하지 않습니다. 우선주·스팩 등도 포함될 수 있습니다. 과거 결과의 다음날 종가 변화는 참고용 관찰값일 뿐 투자 수익이나 미래 성과를 보장하지 않습니다. 외국인·기관·프로그램 매매 분석 및 14:30 장중 실시간 검색은 제공하지 않습니다. FinanceData/marcap 원본은 갱신이 늦어질 수 있습니다. 화면의 <b>기준일과 기대 거래일</b>을 반드시 확인하세요. 최신 시세가 없을 때 표시되는 종목은 과거 기록입니다.</p>
+  <p class="rules"><b>v8.4 과열·급락 경계 점수</b>: 최근 20일 상승(최대 25), 최근 5일 상승(최대 20), 거래량 급증(최대 20), 20일선 이격(최대 20), 당일 상승폭(최대 15)의 합. 60점 이상 🔴, 35점 이상 🟠, 그 외 🟢. <b>가격 방향 예측·급락 확률이 아닌 미검증 경계용 규칙</b>이며 당일 확정 일봉 데이터만 이용합니다. 과열 점수가 낮아도 급락할 수 있습니다. 10월 22일 이후 하락 결과를 거꾸로 점수에 반영하지 않습니다. 차트는 자동 표시되고 회사명을 누르면 기본정보가 열립니다. 업종·대표·제품 정보는 KIND 접속이 가능할 때만 표시하며, 미수집 정보는 추정하지 않습니다. 개별 일봉 차트는 공개 마감 데이터만 사용하며 1년 기준 약 252거래일을 표시합니다. G=골든크로스, D=데드크로스, 20/200=각 이동평균선 상향 돌파입니다. 이들은 확정 일봉의 과거 발생 지점이며 매수 신호가 아닙니다. <b>차트는 현재 v5 확정 일봉 데이터이며 v6 장중 시세와 다른 기준일일 수 있습니다.</b> 점수 기준: 종가&gt;5일 평균선 +25점, 5일선&gt;20일선 +25점, 거래량&gt;이전 54거래일 평균의 1.5배 +20점, 당일 고저가 대비 종가 위치≥75% +20점, 당일 등락률 양수 +10점. 최대 100점. <b>거래대금은 KRX에서 제공한 실제 누적 거래대금</b>을 사용합니다. 거래정지·신규 상장 등 최근 55거래일 자료가 불완전한 종목은 점수 계산에서 제외합니다. 200일선은 200거래일, 200일선 기울기는 205거래일의 종가가 확보되어야 표시됩니다. 부족하면 ‘자료 부족’으로 나타납니다. <b>정배열: 5일선 &gt; 20일선 &gt; 200일선, 오늘 골든크로스: 전 거래일 5일선 ≤ 20일선이면서 당일 5일선 &gt; 20일선.</b> 색상별 추세 판정은 20·200일선의 5거래일 변화와 이평 배치를 이용한 규칙 분류입니다. 기간 및 변화율 기준에 따라 결과는 달라질 수 있으며 강한 상승/하락, 상승 시도/하락 경계 모두 예측이나 매매 신호가 아닙니다. 거래일별 종가를 이용한 판정이며 필터 적용은 기존 점수 계산 기준을 변경하지 않습니다. 우선주·스팩 등도 포함될 수 있습니다. 과거 결과의 다음날 종가 변화는 참고용 관찰값일 뿐 투자 수익이나 미래 성과를 보장하지 않습니다. 외국인·기관·프로그램 매매 분석 및 14:30 장중 실시간 검색은 제공하지 않습니다. FinanceData/marcap 원본은 갱신이 늦어질 수 있습니다. 화면의 <b>기준일과 기대 거래일</b>을 반드시 확인하세요. 최신 시세가 없을 때 표시되는 종목은 과거 기록입니다.</p>
   </section>
 </main>
 <script>
@@ -1137,7 +1147,7 @@ function display(){
   const searching=query.length>0;
   const market=$('market').value;
   const minscore=Number($('minscore').value), minvalue=Number($('minvalue').value), minpos=Number($('position').value);
-  const up=$('change').value === 'up', order=$('sort').value, watchOnly=$('viewmode').value==='watch', mafilter=$('mafilter').value, trendfilter=$('trendfilter').value;
+  const up=$('change').value === 'up', order=$('sort').value, watchOnly=$('viewmode').value==='watch', mafilter=$('mafilter').value, trendfilter=$('trendfilter').value, riskfilter=$('riskfilter').value;
   const candidates=dataRows.filter(x=>{
     if(searching){
       // 검색어를 입력하면 다른 조건(시장, 점수, 거래대금, 상승/하락, 종가위치 등)을 무시
@@ -1147,7 +1157,8 @@ function display(){
       (mafilter==='aligned' && x.ma_aligned===true) ||
       (mafilter==='golden' && x.golden_cross===true) ||
       (mafilter==='both' && x.ma_aligned===true && x.golden_cross===true);
-    return maMatch && (trendfilter==='all' || trendKind(x)===trendfilter) && (market === 'ALL' || x.market === market) && (!watchOnly || x.watch === true) &&
+    const riskMatch=riskfilter==='all' || (riskfilter==='nohigh' && x.risk_level!=='high') || x.risk_level===riskfilter;
+    return maMatch && riskMatch && (trendfilter==='all' || trendKind(x)===trendfilter) && (market === 'ALL' || x.market === market) && (!watchOnly || x.watch === true) &&
       Number(x.score)>=minscore && Number(x.value_eok)>=minvalue &&
       Number(x.close_position)>=minpos && (!up || Number(x.change)>0);
   });
@@ -1183,6 +1194,12 @@ function display(){
     const companyBtn=companyNameButton(x);title.append(companyBtn);
     title.append(elem('span','pill',x.market==='KOSPI'?'코스피':'코스닥'));
     if(x.chase_risk)title.append(elem('span','alertpill','급등 추격주의'));
+    const riskKnown = Number.isInteger(x.risk_score) && x.risk_score>=0 && x.risk_score<=100;
+    const riskTier = riskKnown && ['high','medium','low'].includes(x.risk_level) ? x.risk_level : 'unavailable';
+    const riskLabel = riskTier==='high'?`🔴 과열·급락 경계 ${x.risk_score}/100`:
+      riskTier==='medium'?`🟠 과열 주의 ${x.risk_score}/100`:
+      riskTier==='low'?`🟢 과열 낮음 ${x.risk_score}/100`:'⚪ 위험 미계산';
+    title.append(elem('span','riskpill '+riskTier,riskLabel));
     if(x.watch)title.append(elem('span','pill','관찰조건 충족'));
     if(x.ma_aligned===true)title.append(elem('span','pill','이평 정배열'));
     if(x.golden_cross===true)title.append(elem('span','goldenpill','오늘 골든크로스'));
@@ -1201,7 +1218,18 @@ function display(){
     const why=elem('details','trend-explain');why.append(elem('summary','','📌 추세 판정 근거 보기'));
     why.append(elem('p','',x.trend_reason||'아직 일봉 추세 판정 데이터가 없습니다. 다음 자동 분석 실행 후 확인하세요.'));
     why.append(elem('p','',`이평선: 5일 ${formatMa(x.ma5)} · 20일 ${formatMa(x.ma20)} · 200일 ${formatMa(x.ma200)} / 골든크로스: ${x.golden_cross===true?'발생':'해당 없음'} / 데드크로스: ${x.dead_cross===true?'발생':'해당 없음'}`));
-    card.append(top,slopeLine,detail,why);
+    const riskWhy=elem('details','risk-explain');
+    riskWhy.append(elem('summary','','🛡️ 과열·급락 경계 점수 근거 보기'));
+    const m=x.risk_metrics||{}, p=x.risk_parts||{};
+    if(riskKnown && Object.keys(m).length){
+      const v=(key,suffix)=>Number.isFinite(Number(m[key]))?`${Number(m[key])>0?'+':''}${m[key]}${suffix}`:'자료 부족';
+      riskWhy.append(elem('p','',`지난 20거래일 상승 ${v('rise20','%')} (+${p.rise20||0}/25점) · 5거래일 상승 ${v('rise5','%')} (+${p.rise5||0}/20점)`));
+      riskWhy.append(elem('p','',`20일선 이격 ${v('deviation20','%')} (+${p.deviation20||0}/20점) · 거래량 ${m.volume_ratio??'-'}배 (+${p.volume||0}/20점) · 당일 등락 ${v('change','%')} (+${p.day||0}/15점)`));
+      riskWhy.append(elem('p','',`이 점수는 ${x.date||infoDate} 일봉을 마감할 때까지의 숫자만 사용하는 규칙입니다. 실제 급락 확률이나 손실 예측치가 아닙니다. 과거 신호에서 검증해야 합니다.`));
+    }else{
+      riskWhy.append(elem('p','','⚪ 위험 점수가 아직 없습니다. 변경된 scanner.py로 GitHub 일봉 분석을 실행하면 계산됩니다.'));
+    }
+    card.append(top,slopeLine,detail,why,riskWhy);
     const companyPanel=addCompanyPanel(card,x);
     addChartInline(card,x.code,'v5');
     companyBtn.addEventListener('click',()=>{companyPanel.open=!companyPanel.open;});
@@ -1233,7 +1261,7 @@ async function load(){
   }catch(e){displayBacktest(null);dataRows=[];$('freshness').hidden=false;text($('freshness'),'⚠️ 분석 결과를 읽지 못했습니다. GitHub Actions 실행 상태를 확인하세요.');text($('status'),'⚠️ 분석 데이터를 읽지 못했습니다: '+e.message);}
   finally{$('refresh').disabled=false;display();if($('tabv7').classList.contains('selected'))v7Load();if($('tabv8').classList.contains('selected'))v8Load();}
 }
-['query','viewmode','market','mafilter','trendfilter','minscore','minvalue','change','sort','position'].forEach(id=>
+['query','viewmode','market','mafilter','trendfilter','riskfilter','minscore','minvalue','change','sort','position'].forEach(id=>
   $(id).addEventListener(id==='query'?'input':'change',()=>{countShown=20;display();}));
 $('findstock').addEventListener('click',()=>{countShown=20;display();document.querySelector('#v5panel .titlebar').scrollIntoView({behavior:'smooth',block:'start'});});
 $('clearstock').addEventListener('click',()=>{ $('query').value=''; $('query').blur(); countShown=20; display(); });
