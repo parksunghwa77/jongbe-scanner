@@ -33,6 +33,8 @@ jobs:
         run: pip install -r requirements.txt
       - name: Analyze stocks and generate public EOD chart data
         run: python scanner.py
+      - name: Apply risk-adjusted ranking
+        run: python upgrade_risk_ranking.py
       - name: Prepare website
         run: |
           test -s results.json
