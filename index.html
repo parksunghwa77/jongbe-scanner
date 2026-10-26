@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="theme-color" content="#f4f8ff">
-  <title>종베 스캐너 v8.4 · v5 과열·급락 경계 지표</title>
+  <title>종베 스캐너 v8.5 · 다음 거래일 매도시각 검증</title>
   <style>
     :root{color-scheme:light}*{box-sizing:border-box}
     body{margin:0;background:#101827;color:#f3f6fe;font-family:system-ui,-apple-system,"Noto Sans KR",sans-serif}
@@ -354,10 +354,45 @@
     .v6-perf-note{font-size:12px!important;color:#66777e!important;line-height:1.8!important}
     .v6-perf-warning{background:#fff2db;padding:10px;border:1px solid #eed09b;border-radius:9px;color:#765123;font-size:12px;line-height:1.7}
     @media(min-width:650px){.v6-perf-summary{grid-template-columns:repeat(4,minmax(0,1fr))}}
-</style>
+
+
+    .v85-manual{margin:10px 0;background:white;border:1px solid #c6d9ec;border-radius:10px;padding:10px;font-size:12px;color:#2f567b}
+    .v85-manual .v85-config{margin:8px 0;gap:7px}
+    .v85-manual input{background:#fff;color:#1e4166;border:1px solid #b9cde3;border-radius:7px;padding:8px;font-size:13px}
+    .v85-manual-btn{font-size:12px;padding:9px 11px;background:#2673b2}
+    /* v8.5: Verified minute-bar exit-time research only; no guessed intraday prices. */
+    .v85-panel{margin:16px 0;padding:15px;background:#f8f9ff;border:1px solid #b8c9ed;border-radius:16px;color:#284766}
+    .v85-panel>summary{cursor:pointer;font-size:18px;font-weight:850;line-height:1.5;color:#245a9d}
+    .v85-panel p{color:#456078;font-size:13px;line-height:1.65}
+    .v85-config{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:9px;margin:12px 0}
+    .v85-config label{display:flex;flex-direction:column;gap:6px;color:#315071;font-weight:700;font-size:12px;min-width:0}
+    .v85-config select{background:#fff;color:#214363;border:1px solid #b7cee4;border-radius:8px;min-width:0;font-size:13px}
+    .v85-import{border:1px solid #c3d9eb;background:#eef5fc;padding:12px;border-radius:12px}
+    .v85-import label{color:#214363;font-size:12px;font-weight:750}
+    .v85-import input[type=file]{background:#fff;color:#254467;font-size:12px;width:100%;padding:8px;margin:7px 0}
+    .v85-import textarea{width:100%;min-height:78px;resize:vertical;background:white;color:#204366;border:1px solid #b7c8df;font:12px/1.5 ui-monospace,SFMono-Regular,Consolas,monospace;padding:8px;border-radius:8px}
+    .v85-buttons{display:flex;gap:7px;flex-wrap:wrap;margin:10px 0 0}
+    .v85-buttons button{font-size:12px;padding:9px 11px;background:#3277c8}
+    .v85-buttons button.secondary{background:#e6edf8;color:#2e5789;border:1px solid #b9cde5}
+    .v85-status{background:#e4eff9;border-radius:10px;padding:11px;margin:11px 0;line-height:1.65;font-size:12px;color:#2d5177;white-space:pre-wrap}
+    .v85-status.warning{background:#fff3dd;color:#805522;border:1px solid #f0d49b}
+    .v85-kpis{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin:11px 0}
+    .v85-kpis>div{background:white;border:1px solid #cfdfec;border-radius:10px;padding:11px;text-align:center}
+    .v85-kpis strong{display:block;color:#16745b;font-size:20px}
+    .v85-kpis span{font-size:11px;color:#55718e}
+    .v85-table-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch;background:#fff;border:1px solid #ccdbec;border-radius:10px;margin:12px 0}
+    .v85-table{min-width:500px;width:100%;border-collapse:collapse;font-size:12px;color:#31526f}
+    .v85-table th{background:#deebfb;text-align:right;color:#24517f;padding:9px 6px}
+    .v85-table th:first-child,.v85-table td:first-child{text-align:left}
+    .v85-table td{padding:10px 6px;border-top:1px solid #e4ebf5;text-align:right}
+    .v85-gain{color:#0c845a;font-weight:750}.v85-loss{color:#c84e40;font-weight:750}
+    .v85-warning{padding:11px;background:#fff4e6;border:1px solid #f1d5ab;color:#815827;font-size:12px;line-height:1.7;border-radius:10px}
+    .v85-card{background:#fff;border:1px solid #d1dfed;border-radius:10px;padding:10px;margin:9px 0;font-size:12px;color:#42617f;line-height:1.7}
+    .v85-card b{color:#1c547f;font-size:13px}
+  </style>
 </head>
 <body><main>
-  <h1 class="app-title">📈 종베 스캐너 <span>v8.4</span></h1>
+  <h1 class="app-title">📈 종베 스캐너 <span>v8.5</span></h1>
   <div class="status-pill">🔎 읽기 전용 · 투자 추천 아님</div>
   <nav class="switcher" aria-label="분석 화면 선택">
     <button id="tabv6" type="button" class="selected" aria-pressed="true">v6 장중 관찰</button>
@@ -399,6 +434,40 @@
       <div class="v6-perf-status" id="v6perfStatus" role="status" aria-live="polite">기록을 불러오는 중…</div>
       <div id="v6perfRows"></div>
       <p class="v6-perf-note">⚠️ 장중 점수는 실시간 체결가가 아닙니다. 공개 차트에 저장한 확정 일봉만으로 계산하므로 <b>14:30 → 당일 종가 수익률</b>은 구할 수 없어요. 당일 등락률은 전일 종가 대비, 다음날 변화율은 <b>신호 당일 종가 대비</b>입니다. 매수·매도 체결, 수수료·슬리피지, 55종목 외의 종목, 생존편향은 반영하지 않은 관찰 통계예요. 저장된 날짜·종목별 신호는 서로 독립적인 관측값이 아닙니다.</p>
+    </details>
+
+    <details class="v85-panel" id="v85Panel" aria-label="다음 거래일 매도시각 09:00 09:15 09:30 비교">
+      <summary>🕘 v8.5 · 다음 날 09:00 / 09:15 / 09:30 매도 비교</summary>
+      <p><b>v6 장중 기록</b>을 신호로 고정하고, 신호일 <b>확정 종가 매수 가정</b>에서 다음 거래일 KRX 정규장 시각별 매도 결과를 비교합니다. <b>09:00은 공개 일봉의 시가</b>를 사용합니다. 09:15·09:30은 별도로 확보한 <b>1분봉 시작가 CSV</b>가 있어야 비교할 수 있어요. 분봉 자료가 없으면 임의로 계산하지 않습니다.</p>
+      <div class="v85-config">
+        <label for="v85min">신호 점수<select id="v85min"><option value="100" selected>100점만</option><option value="80">80점 이상</option><option value="60">60점 이상</option></select></label>
+        <label for="v85cost">왕복 거래비용·슬리피지(합계)<select id="v85cost"><option value="0">0.0%p (비용 제외)</option><option value="0.3">0.3%p</option><option value="0.5" selected>0.5%p</option><option value="0.7">0.7%p</option><option value="1">1.0%p</option></select></label>
+      </div>
+      <section class="v85-import" aria-label="과거 분봉 자료 업로드">
+        <label for="v85file">📂 KRX 1분봉 CSV 파일 (브라우저 안에서만 분석)</label>
+        <input id="v85file" type="file" accept=".csv,.txt,text/csv,text/plain" aria-label="분봉 CSV 파일 선택">
+        <label for="v85paste">또는 CSV 내용을 직접 붙여넣기</label>
+        <textarea id="v85paste" spellcheck="false" placeholder="date,code,time,open&#10;2026-10-27,064400,09:15,...&#10;2026-10-27,064400,09:30,..." aria-label="분봉 CSV 텍스트 붙여넣기"></textarea>
+        <div class="v85-manual">
+          <b>📱 스마트폰 빠른 입력 · 1종목</b>
+          <div class="v85-config">
+            <label for="v85mDate">다음 거래일 날짜<input type="date" id="v85mDate"></label>
+            <label for="v85mCode">종목코드 6자리<input id="v85mCode" type="text" inputmode="numeric" maxlength="6" placeholder="예: 064400"></label>
+            <label for="v85m15">09:15 1분봉 시작가(원)<input id="v85m15" type="number" min="1" step="1" inputmode="decimal" placeholder="확정 값 직접 입력"></label>
+            <label for="v85m30">09:30 1분봉 시작가(원)<input id="v85m30" type="number" min="1" step="1" inputmode="decimal" placeholder="확정 값 직접 입력"></label>
+          </div>
+          <button id="v85addManual" type="button" class="v85-manual-btn">➕ 1종목 분봉 가격 추가</button>
+        </div>
+        <div class="v85-buttons">
+          <button id="v85run" type="button">📊 매도시각 비교하기</button>
+          <button id="v85template" type="button" class="secondary">CSV 양식 저장</button>
+          <button id="v85reset" type="button" class="secondary">분봉 입력 초기화</button>
+        </div>
+      </section>
+      <div id="v85status" class="v85-status" role="status" aria-live="polite">확정 일봉만으로는 09:15·09:30 수익률을 알 수 없어요. 분봉 CSV를 불러오고 비교해 주세요.</div>
+      <div id="v85kpis" class="v85-kpis"></div>
+      <div id="v85results"></div>
+      <p class="v85-warning">⚠️ <b>과거 연구용·매매 추천 아님.</b> KRX 정규장 분봉의 <b>해당 분 시작가</b>를 가상 매도가로 사용합니다. 실체결·시장가 충격·호가·수수료 구성·거래세·갭 리스크를 정확히 재현하지 못합니다. 특히 09:00 시가는 시초가 매도를 실제로 체결했다는 보장이 아니며, 09:15·09:30은 해당 시각 1분봉 시작가이지 주문 체결가가 아닙니다. NXT 시세·수정주가가 섞이면 결과가 달라질 수 있어요. 동일 날짜·종목의 <b>세 시각 가격이 모두 있는 사례만 공정하게 비교</b>하고, 신호 표본이 적을 때 우열을 판단하지 않습니다.</p>
     </details>
     <div class="v6-tools">
       <div class="v6-search-block">
@@ -2226,6 +2295,211 @@ $('v8searchForm').addEventListener('reset',e=>{
 ['v8reference','v8market','v8score','v8ma','v8value','v8sort'].forEach(id=>$(id).addEventListener('change',()=>{v8Shown=15;v8Render();}));
 $('v8more').addEventListener('click',()=>{v8Shown+=15;v8Render();});
 $('v8refresh').addEventListener('click',()=>{v8AsOf='';v8Load();});
+
+
+/* v8.5: Time-of-exit research. Minute prices are NEVER generated from EOD OHLCV or API snapshots.
+   Official next KRX session 09:00 opening comes from public daily OHLCV; 09:15/09:30 require user minute bars.
+   Minute CSV stays in browser memory; no network upload and no persistent storage. */
+let v85MinuteBars=new Map();
+let v85Conflicts=new Set();
+let v85InputNote='분봉 CSV 미입력';
+let v85Running=false;
+const V85_TIMES=['09:00','09:15','09:30'];
+function v85NormHead(s){return String(s||'').replace(/^\uFEFF/,'').toLowerCase().replace(/[\s_\-()\[\]]/g,'');}
+function v85CsvCells(line,sep){
+  const out=[];let val='',quoted=false;
+  for(let i=0;i<line.length;i++){
+    const c=line[i];
+    if(c==='"'){
+      if(quoted&&line[i+1]==='"'){val+='"';i++;}
+      else quoted=!quoted;
+    }else if(c===sep&&!quoted){out.push(val.trim());val='';}
+    else val+=c;
+  }
+  if(quoted)throw Error('닫히지 않은 따옴표가 있어요.');
+  out.push(val.trim());return out;
+}
+function v85ReadCsv(raw){
+  const data=String(raw||'').replace(/^\uFEFF/,'').trim();
+  if(!data)return {bars:new Map(),conflicts:new Set(),added:0,skipped:0,duplicate:0};
+  if(data.length>1500000)throw Error('CSV 파일은 1.5MB 이하로 나누어 주세요.');
+  const lines=data.split(/\r?\n/).filter(x=>x.trim());
+  if(lines.length>20001)throw Error('한 번에 20,000줄 이하로 입력해 주세요.');
+  const separator=lines[0].includes('\t')?'\t':',';
+  const headers=v85CsvCells(lines[0],separator).map(v85NormHead);
+  const find=(aliases)=>headers.findIndex(h=>aliases.some(a=>v85NormHead(a)===h));
+  const indices={date:find(['date','tradedate','거래일','날짜','일자']),code:find(['code','stockcode','종목코드','단축코드']),time:find(['time','시각','시간','체결시간']),open:find(['open','openprice','시가','분봉시가'])};
+  if(Object.values(indices).some(x=>x<0))throw Error('CSV 첫 줄에 date,code,time,open 열이 필요해요 (한글: 날짜,종목코드,시간,시가).');
+  const bars=new Map(),conflicts=new Set();let added=0,skipped=0,duplicate=0;
+  for(let i=1;i<lines.length;i++){
+    const cells=v85CsvCells(lines[i],separator);
+    const date=String(cells[indices.date]||'').trim().replace(/\./g,'-').replace(/\//g,'-');
+    const code=String(cells[indices.code]||'').trim().replace(/^'/,'').replace(/\.0$/,'').padStart(6,'0');
+    const t0=String(cells[indices.time]||'').trim();
+    let hhmm=t0;
+    if(/^\d{6}$/.test(t0))hhmm=t0.slice(0,2)+':'+t0.slice(2,4);
+    else if(/^\d{4}$/.test(t0))hhmm=t0.slice(0,2)+':'+t0.slice(2,4);
+    else if(/^\d{1,2}:\d{2}:\d{2}$/.test(t0))hhmm=t0.slice(0,-3);
+    const parts=hhmm.match(/^(\d{1,2}):(\d{2})$/);
+    const time=parts?parts[1].padStart(2,'0')+':'+parts[2]:'';
+    const val=String(cells[indices.open]||'').replace(/,/g,'').trim();
+    const price=Number(val);
+    if(!/^\d{4}-\d{2}-\d{2}$/.test(date)||Number.isNaN(Date.parse(date+'T00:00:00Z'))||
+       !/^\d{6}$/.test(code)||!V85_TIMES.includes(time)||!val||!Number.isFinite(price)||price<=0){skipped++;continue;}
+    const key=date+'|'+code+'|'+time;
+    if(conflicts.has(key)){skipped++;continue;}
+    if(bars.has(key)){
+      if(bars.get(key)!==price){bars.delete(key);conflicts.add(key);skipped++;}else duplicate++;
+      continue;
+    }
+    bars.set(key,price);added++;
+  }
+  return {bars,conflicts,added,skipped,duplicate};
+}
+function v85CsvExample(){
+  const data='date,code,time,open\n';
+  const blob=new Blob(['\uFEFF',data],{type:'text/csv;charset=utf-8'});
+  const uri=URL.createObjectURL(blob);const a=document.createElement('a');a.href=uri;a.download='종베-v85-분봉입력-양식.csv';
+  document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(uri),3000);
+}
+function v85FormatPct(x){return Number.isFinite(x)?(x>0?'+':'')+x.toFixed(2)+'%':'대기';}
+function v85Mean(a){return a.length?a.reduce((s,v)=>s+v,0)/a.length:null;}
+function v85Median(a){if(!a.length)return null;const x=[...a].sort((a,b)=>a-b);const n=x.length;return n%2?x[Math.floor(n/2)]:(x[n/2-1]+x[n/2])/2;}
+function v85AppendStat(container,title,val){const d=v6El('div');d.append(v6El('strong','',val),v6El('span','',title));container.append(d);}
+async function v85Analyze(){
+  if(v85Running)return;
+  v85Running=true;const button=$('v85run');button.disabled=true;
+  const status=$('v85status'),out=$('v85results'),kpis=$('v85kpis');
+  status.classList.remove('warning');status.textContent='저장된 점수와 확정 일봉, 입력 분봉을 대조하고 있어요…';
+  try{
+    // The CSV was already parsed on file selection, or is pasted into the textarea.
+    const pasted=$('v85paste').value.trim();
+    if(pasted){const parsed=v85ReadCsv(pasted);v85MinuteBars=parsed.bars;v85Conflicts=parsed.conflicts;
+      v85InputNote=`직접 입력 ${parsed.bars.size}건 · 제외 ${parsed.skipped}건 · 동일 ${parsed.duplicate}건 · 값 충돌 ${parsed.conflicts.size}건`;
+    }
+    if(!v6PerfHistory.length){const archived=await v6PerfFetchHistory();v6PerfHistory=v6PerfMerged(archived);}
+    const limit=Number($('v85min').value),cost=Number($('v85cost').value);
+    const all=v6PerfHistory.slice(-60).reverse().flatMap(s=>s.rows.filter(x=>x.score>=limit&&!x.caution).map(x=>({...x,session_date:s.session_date})));
+    const signals=all.slice(0,160);let missingSignalDay=0,pendingNext=0,mismatch=0;
+    const paired=[], partial=[];
+    for(let i=0;i<signals.length;i+=4){
+      const batch=await Promise.all(signals.slice(i,i+4).map(async s=>{
+        try{
+          const series=await getChartSeries(s.code);const n=series.findIndex(v=>v[0]===s.session_date);
+          if(n<0)return {status:'missing',s};
+          if(!series[n+1])return {status:'pending',s};
+          const next=series[n+1],entry=Number(series[n][4]),open=Number(next[1]);
+          if(!Number.isFinite(entry)||entry<=0||!Number.isFinite(open)||open<=0)return {status:'missing',s};
+          const date=next[0],prefix=date+'|'+s.code+'|';
+          const csvOpen=v85MinuteBars.get(prefix+'09:00');
+          // A 09:00 CSV open must agree with KRX public official opening price (within 0.5%).
+          if(v85Conflicts.has(prefix+'09:00')||(csvOpen && Math.abs(csvOpen/open-1)>0.005))return {status:'mismatch',s};
+          const b15=v85MinuteBars.get(prefix+'09:15'),b30=v85MinuteBars.get(prefix+'09:30');
+          // Each minute opening must stay within the same day's official OHLC range.
+          const low=Number(next[3]),high=Number(next[2]);
+          if(!Number.isFinite(low)||!Number.isFinite(high)||low<=0||high<low||
+             [b15,b30].some(p=>p!==undefined && (p<low||p>high)))return {status:'mismatch',s};
+          const value=(p)=>p>0?100*(p/entry-1)-cost:null;
+          const base={s,date,entry,open,returns:[value(open),b15?value(b15):null,b30?value(b30):null]};
+          if(v85Conflicts.has(prefix+'09:15')||v85Conflicts.has(prefix+'09:30'))return {status:'mismatch',s};
+          return {status:base.returns.every(Number.isFinite)?'paired':'partial',row:base};
+        }catch(e){return {status:'missing',s};}
+      }));
+      for(const b of batch){if(b.status==='missing')missingSignalDay++;
+        else if(b.status==='pending')pendingNext++;
+        else if(b.status==='mismatch')mismatch++;
+        else if(b.status==='paired')paired.push(b.row);else partial.push(b.row);}
+    }
+    kpis.replaceChildren();out.replaceChildren();
+    v85AppendStat(kpis,'선택한 v6 신호',String(signals.length));
+    v85AppendStat(kpis,'3시각 공통 비교',String(paired.length));
+    v85AppendStat(kpis,'09:00만·일부 입력',String(partial.length));
+    v85AppendStat(kpis,'일봉 미확보·불일치',String(missingSignalDay+pendingNext+mismatch));
+    const note=`${v85InputNote} · v6 기록 ${v6PerfHistory.length}거래일 · 선택 ${limit}점 이상 / 급변 위험 제외 · 왕복 가정 비용 ${cost.toFixed(1)}%p.\n확정 일봉 기준 ${infoDate||'-'} · 신호일 미확보 ${missingSignalDay}건 · 다음날 미확보 ${pendingNext}건 · 분봉 날짜/시가 충돌 ${mismatch}건.\n⚠️ 종가 매수·시각별 매도 가정일 뿐 실제 체결 기록은 아닙니다.`;
+    status.textContent=note;
+    if(!signals.length){status.classList.add('warning');out.append(v6El('p','v85-warning','선택한 점수의 날짜별 v6 기록이 아직 없습니다.'));return;}
+    if(!paired.length){status.classList.add('warning');out.append(v6El('div','v85-warning',
+      '📌 아직 세 시각의 공정 비교 표본이 0건이에요. 공개 일봉이 신호 다음 거래일까지 갱신되어야 09:00을 계산할 수 있고, 해당 종목·다음 거래일의 09:15 및 09:30 KRX 1분봉 시작가를 CSV로 입력해야 해요. 분봉이 없어도 09:15·09:30 가격을 임의로 만들지 않습니다.'));
+      if(partial.length){const raw=partial.map(x=>x.returns[0]);out.append(v6El('p','v85-status',`09:00 단독 참고: ${partial.length}건 · 평균(왕복 비용 가정 차감) ${v85FormatPct(v85Mean(raw))} · 09:15/09:30과 공정 비교 불가.`));}
+      return;
+    }
+    const wrap=v6El('div','v85-table-wrap');const table=v6El('table','v85-table');
+    const h=document.createElement('thead');const hr=document.createElement('tr');
+    for(const name of ['매도 기준','공통 표본','평균 순변화','중앙값','양(+) 비율','최악 값'])hr.append(v6El('th','',name));
+    h.append(hr);table.append(h);const body=document.createElement('tbody');
+    for(let j=0;j<3;j++){
+      const v=paired.map(x=>x.returns[j]),avg=v85Mean(v),win=100*v.filter(y=>y>0).length/v.length;
+      const tr=document.createElement('tr');tr.append(v6El('td','',V85_TIMES[j]),v6El('td','',String(v.length)));
+      for(const str of [v85FormatPct(avg),v85FormatPct(v85Median(v)),win.toFixed(1)+'%',v85FormatPct(Math.min(...v))]){
+        const td=v6El('td','',str);const n=parseFloat(str);
+        if(Number.isFinite(n)&&str.endsWith('%')&&n!==0)td.classList.add(n>0?'v85-gain':'v85-loss');tr.append(td);
+      }
+      body.append(tr);
+    }
+    table.append(body);wrap.append(table);out.append(wrap);
+    const bestMeans=[0,1,2].map(j=>v85Mean(paired.map(x=>x.returns[j])));
+    const best=bestMeans.indexOf(Math.max(...bestMeans));
+    out.append(v6El('p','v85-warning',`현재 표본 ${paired.length}건에서 가상 평균이 가장 높은 시각은 ${V85_TIMES[best]} (${v85FormatPct(bestMeans[best])})입니다. 소표본·선택편향·실제 체결 불확실성이 있어 최적 매도시간을 입증한 결과가 아닙니다.`));
+    for(const x of paired.slice(0,12)){
+      const div=v6El('div','v85-card');
+      div.append(v6El('b','',`${x.s.name} (${x.s.code}) · 신호 ${x.s.session_date} · 매도 비교 ${x.date}`));
+      div.append(v6El('div','',`기준 종가 ${fmt(x.entry)}원 · 다음날 KRX 시가 ${fmt(x.open)}원 · 09:00 ${v85FormatPct(x.returns[0])} / 09:15 ${v85FormatPct(x.returns[1])} / 09:30 ${v85FormatPct(x.returns[2])}`));
+      out.append(div);
+    }
+    if(paired.length>12)out.append(v6El('p','',`최근 12개 신호만 개별 표시합니다. 전체 ${paired.length}개 공통 표본은 위 통계에 포함돼요.`));
+  }catch(e){status.classList.add('warning');status.textContent='⚠️ 비교 실패: '+e.message;}
+  finally{v85Running=false;button.disabled=false;}
+}
+
+$('v85addManual').addEventListener('click',()=>{
+  const date=$('v85mDate').value.trim(),code=$('v85mCode').value.trim().padStart(6,'0');
+  const p15=$('v85m15').value.trim(),p30=$('v85m30').value.trim();
+  const status=$('v85status');
+  if(!v6PerfIsDate(date)||!/^\d{6}$/.test(code)||!p15||!p30||
+     !Number.isFinite(Number(p15))||!Number.isFinite(Number(p30))||Number(p15)<=0||Number(p30)<=0){
+    status.classList.add('warning');status.textContent='⚠️ 다음 거래일, 종목코드, 09:15·09:30 시작가를 정확히 입력해 주세요.';return;
+  }
+  let pasted=$('v85paste').value.trim();
+  if(!pasted)pasted='date,code,time,open';
+  else if(!pasted.toLowerCase().startsWith('date,code,time,open') && !pasted.startsWith('날짜,')){
+    status.classList.add('warning');status.textContent='⚠️ 붙여넣기 칸의 CSV 첫 줄 형식을 확인해 주세요. 양식을 먼저 눌러 주세요.';return;
+  }
+  const lines=pasted.split(/\r?\n/).filter(Boolean);
+  // Replace a previous manual entry for the same date/code/time to avoid false duplicates.
+  const dateCode=date+','+code+',';
+  const kept=lines.filter((line,i)=>i===0||!(line.startsWith(dateCode+'09:15,')||line.startsWith(dateCode+'09:30,')));
+  kept.push(`${date},${code},09:15,${p15}`,`${date},${code},09:30,${p30}`);
+  const combined=kept.join('\n');
+  try{
+    const parsed=v85ReadCsv(combined);
+    $('v85paste').value=combined;v85MinuteBars=parsed.bars;v85Conflicts=parsed.conflicts;
+    v85InputNote=`직접 입력 ${parsed.bars.size}건 · 중복/형식 제외 ${parsed.skipped}건`;
+    status.classList.remove('warning');status.textContent='✅ '+date+' '+code+' 09:15·09:30 분봉 가격을 추가했어요. 「매도시각 비교하기」를 눌러 주세요.';
+  }catch(e){status.classList.add('warning');status.textContent='⚠️ '+e.message;}
+});
+$('v85template').addEventListener('click',v85CsvExample);
+$('v85file').addEventListener('change',async event=>{
+  const file=event.target.files?.[0];if(!file)return;
+  const status=$('v85status');
+  try{
+    if(file.size>1500000)throw Error('파일을 1.5MB 이하로 나눠 주세요.');
+    const bytes=await file.arrayBuffer();let raw;
+    try{raw=new TextDecoder('utf-8',{fatal:true}).decode(bytes);}catch{raw=new TextDecoder('euc-kr').decode(bytes);}
+    const parsed=v85ReadCsv(raw);
+    v85MinuteBars=parsed.bars;v85Conflicts=parsed.conflicts;$('v85paste').value='';
+    v85InputNote=`CSV ${file.name} · 유효 ${parsed.bars.size}건 · 제외 ${parsed.skipped}건 · 중복 ${parsed.duplicate}건 · 충돌 ${parsed.conflicts.size}건`;
+    status.classList.remove('warning');status.textContent=v85InputNote+'\n이제 「매도시각 비교하기」를 눌러주세요. 분봉 자료는 서버로 전송되지 않아요.';
+  }catch(e){v85MinuteBars=new Map();v85Conflicts=new Set();v85InputNote='CSV 해석 실패';status.classList.add('warning');status.textContent='⚠️ '+e.message;}
+});
+$('v85run').addEventListener('click',v85Analyze);
+$('v85min').addEventListener('change',v85Analyze);
+$('v85cost').addEventListener('change',v85Analyze);
+$('v85reset').addEventListener('click',()=>{
+  v85MinuteBars=new Map();v85Conflicts=new Set();v85InputNote='분봉 CSV 미입력';
+  $('v85file').value='';$('v85paste').value='';['v85mDate','v85mCode','v85m15','v85m30'].forEach(id=>$(id).value='');
+  $('v85status').classList.remove('warning');$('v85status').textContent='분봉 입력을 초기화했습니다. 분봉이 없으면 09:15·09:30 가격은 계산하지 않습니다.';
+  $('v85results').replaceChildren();$('v85kpis').replaceChildren();
+});
 
 function v6Switch(kind){
   for(const t of ['v5','v6','v7','v8']){
