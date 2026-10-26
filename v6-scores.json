@@ -1,19 +1,13 @@
 {
   "schema": "jongbe-v6.2-public-scores",
   "session_date": "2026-10-26",
-  "generated_kst": "2026-10-26 14:35 KST",
+  "generated_kst": "2026-10-26 14:58 KST",
   "source": "기본 관심종목 + GitHub Pages에 게시된 v5 결과 (2026-10-22; v5에서 43개 후보 추가, 최대 55종목)",
   "requested_count": 55,
   "quoted_count": 55,
   "quote_timestamp_verified": false,
   "warning": "점수는 상승 확률이나 매수 추천이 아님. API 시세 체결 시각 미검증.",
   "rows": [
-    {
-      "code": "009150",
-      "name": "삼성전기",
-      "score": 100,
-      "caution": ""
-    },
     {
       "code": "064400",
       "name": "LG씨엔에스",
@@ -27,9 +21,9 @@
       "caution": ""
     },
     {
-      "code": "219130",
-      "name": "타이거일렉",
-      "score": 80,
+      "code": "340360",
+      "name": "다보링크",
+      "score": 90,
       "caution": ""
     },
     {
@@ -45,6 +39,12 @@
       "caution": ""
     },
     {
+      "code": "009150",
+      "name": "삼성전기",
+      "score": 70,
+      "caution": ""
+    },
+    {
       "code": "006400",
       "name": "삼성SDI",
       "score": 70,
@@ -54,12 +54,6 @@
       "code": "035420",
       "name": "NAVER",
       "score": 70,
-      "caution": ""
-    },
-    {
-      "code": "001780",
-      "name": "알루코",
-      "score": 65,
       "caution": ""
     },
     {
@@ -81,8 +75,8 @@
       "caution": ""
     },
     {
-      "code": "484120",
-      "name": "도우인시스",
+      "code": "142210",
+      "name": "유니트론텍",
       "score": 60,
       "caution": ""
     },
@@ -93,9 +87,21 @@
       "caution": ""
     },
     {
-      "code": "340360",
-      "name": "다보링크",
-      "score": 60,
+      "code": "137940",
+      "name": "넥스트아이",
+      "score": 55,
+      "caution": ""
+    },
+    {
+      "code": "361670",
+      "name": "삼영에스앤씨",
+      "score": 55,
+      "caution": ""
+    },
+    {
+      "code": "219130",
+      "name": "타이거일렉",
+      "score": 50,
       "caution": ""
     },
     {
@@ -119,12 +125,6 @@
     {
       "code": "042700",
       "name": "한미반도체",
-      "score": 45,
-      "caution": ""
-    },
-    {
-      "code": "126340",
-      "name": "비나텍",
       "score": 45,
       "caution": ""
     },
@@ -153,6 +153,12 @@
       "caution": ""
     },
     {
+      "code": "484120",
+      "name": "도우인시스",
+      "score": 35,
+      "caution": ""
+    },
+    {
       "code": "077500",
       "name": "유니퀘스트",
       "score": 35,
@@ -173,12 +179,6 @@
     {
       "code": "024740",
       "name": "한일단조",
-      "score": 35,
-      "caution": ""
-    },
-    {
-      "code": "142210",
-      "name": "유니트론텍",
       "score": 35,
       "caution": ""
     },
@@ -207,6 +207,12 @@
       "caution": ""
     },
     {
+      "code": "001780",
+      "name": "알루코",
+      "score": 35,
+      "caution": ""
+    },
+    {
       "code": "206560",
       "name": "덱스터",
       "score": 35,
@@ -225,14 +231,14 @@
       "caution": ""
     },
     {
-      "code": "007310",
-      "name": "오뚜기",
+      "code": "084110",
+      "name": "휴온스글로벌",
       "score": 25,
       "caution": ""
     },
     {
-      "code": "084110",
-      "name": "휴온스글로벌",
+      "code": "007310",
+      "name": "오뚜기",
       "score": 25,
       "caution": ""
     },
@@ -291,28 +297,16 @@
       "caution": ""
     },
     {
-      "code": "361670",
-      "name": "삼영에스앤씨",
-      "score": 25,
-      "caution": ""
-    },
-    {
-      "code": "137940",
-      "name": "넥스트아이",
-      "score": 25,
-      "caution": ""
-    },
-    {
       "code": "441270",
       "name": "파인엠텍",
       "score": 20,
       "caution": ""
     },
     {
-      "code": "065450",
-      "name": "빅텍",
+      "code": "126340",
+      "name": "비나텍",
       "score": 20,
-      "caution": "급변 위험"
+      "caution": ""
     },
     {
       "code": "089890",
@@ -321,10 +315,16 @@
       "caution": "급변 위험"
     },
     {
+      "code": "065450",
+      "name": "빅텍",
+      "score": 20,
+      "caution": "급변 위험"
+    },
+    {
       "code": "354320",
       "name": "알멕",
       "score": 10,
-      "caution": ""
+      "caution": "급변 위험"
     },
     {
       "code": "003010",
