@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="theme-color" content="#f4f8ff">
-  <title>종베 스캐너 v8.2 · 종목 기준일 옆 PER·PBR</title>
+  <title>종베 스캐너 v8.3 · v6 장중 신호 사후 검증</title>
   <style>
     :root{color-scheme:light}*{box-sizing:border-box}
     body{margin:0;background:#101827;color:#f3f6fe;font-family:system-ui,-apple-system,"Noto Sans KR",sans-serif}
@@ -319,10 +319,37 @@
     .stock-date-ratios .stock-ratio{display:inline-block;padding:2px 7px;border:1px solid #c9daec;border-radius:7px;background:#eef5fc;color:#244c73;font-weight:650;white-space:nowrap}
     .stock-date-ratios .stock-ratio.is-missing{background:#f1f2f5;color:#6a7888;border-color:#d9e0e7}
     .stock-date-ratios .ratio-date{font-size:11px;color:#5b7592}
+
+    /* v8.3: v6 watchlist signal tracking; no intraday raw quotes are stored. */
+    .v6-perf{background:#f3faf8;border:1px solid #a7d1c7;border-radius:16px;padding:14px;margin:16px 0;color:#204c47}
+    .v6-perf>summary{cursor:pointer;margin:0;color:#135e53;font-size:18px;font-weight:850;line-height:1.6}
+    .v6-perf[open]>summary{margin-bottom:8px}
+    .v6-perf-prices{background:#ecf5fd;border-radius:8px;padding:7px 9px;margin:8px 0;font-size:12px;color:#254863;line-height:1.7}
+    .v6-perf p{font-size:13px;line-height:1.7;margin:7px 0;color:#365f63}
+    .v6-perf-controls{display:flex;flex-wrap:wrap;align-items:end;gap:8px;margin:14px 0}
+    .v6-perf-controls label{display:flex;flex-direction:column;gap:5px;font-size:13px;font-weight:750}
+    .v6-perf-controls select{min-height:42px;background:#fff;color:#173e56;border:1px solid #aac9c3;border-radius:9px;padding:8px;min-width:140px}
+    .v6-perf-controls button{min-height:42px;padding:8px 11px;background:#2672c7;color:#fff;border-radius:9px}
+    .v6-perf-controls button:disabled{opacity:.55}
+    .v6-perf-summary{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin:10px 0}
+    .v6-perf-summary>div{border:1px solid #c9e0da;background:#fff;padding:11px 8px;border-radius:11px;text-align:center;min-width:0}
+    .v6-perf-summary strong{display:block;font-size:21px;color:#126950}
+    .v6-perf-summary span{font-size:12px;color:#45646a}
+    .v6-perf-status{background:#e4f0f5;border-radius:10px;padding:10px;font-size:12px;line-height:1.6;white-space:pre-line;margin:10px 0}
+    .v6-perf-row{background:#fff;border:1px solid #cae1da;border-radius:10px;padding:11px;margin:9px 0;line-height:1.7}
+    .v6-perf-row h4{margin:0;color:#1c4963;font-size:15px;overflow-wrap:anywhere}
+    .v6-perf-row small{color:#657e87;font-size:11px}
+    .v6-perf-facts{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:5px 10px;margin-top:8px;font-size:12px}
+    .v6-perf-facts div{min-width:0;color:#385b63}
+    .v6-perf-facts b{font-size:13px;color:#233d56}
+    .v6-perf-facts .gain{color:#0c7e52}.v6-perf-facts .loss{color:#c13e35}.v6-perf-facts .pending{color:#6b7a8b}
+    .v6-perf-note{font-size:12px!important;color:#66777e!important;line-height:1.8!important}
+    .v6-perf-warning{background:#fff2db;padding:10px;border:1px solid #eed09b;border-radius:9px;color:#765123;font-size:12px;line-height:1.7}
+    @media(min-width:650px){.v6-perf-summary{grid-template-columns:repeat(4,minmax(0,1fr))}}
 </style>
 </head>
 <body><main>
-  <h1 class="app-title">📈 종베 스캐너 <span>v8.2</span></h1>
+  <h1 class="app-title">📈 종베 스캐너 <span>v8.3</span></h1>
   <div class="status-pill">🔎 읽기 전용 · 투자 추천 아님</div>
   <nav class="switcher" aria-label="분석 화면 선택">
     <button id="tabv6" type="button" class="selected" aria-pressed="true">v6 장중 관찰</button>
@@ -347,6 +374,24 @@
       <div class="v6-stat"><strong id="v6pass">–</strong><span>60점 이상·위험 제외</span></div>
       <div class="v6-stat"><strong id="v6shown">–</strong><span>현재 표시</span></div>
     </div>
+
+    <details class="v6-perf" id="v6perfPanel" aria-label="v6 장중 점수 사후 검증">
+      <summary>📋 100점 종목의 종가·다음날 결과 보기</summary>
+      <p>오후 2시 30분 무렵 기록된 <b>관찰 점수</b>를 고정한 뒤 공개된 <b>확정 일봉</b>으로 당일 마감과 다음 거래일 가격 변화를 비교해요.</p>
+      <div class="v6-perf-controls">
+        <label for="v6perfMin">추적 점수<select id="v6perfMin"><option value="100" selected>100점만</option><option value="80">80점 이상</option><option value="60">60점 이상</option></select></label>
+        <button type="button" id="v6perfRefresh">📊 사후 결과 새로고침</button>
+      </div>
+      <div class="v6-perf-summary" id="v6perfSummary" aria-label="v6 신호 확인 통계">
+        <div><strong>–</strong><span>기록된 신호</span></div>
+        <div><strong>–</strong><span>당일 상승 마감</span></div>
+        <div><strong>–</strong><span>다음 거래일 상승 비율</span></div>
+        <div><strong>–</strong><span>다음 거래일 평균 변화</span></div>
+      </div>
+      <div class="v6-perf-status" id="v6perfStatus" role="status" aria-live="polite">기록을 불러오는 중…</div>
+      <div id="v6perfRows"></div>
+      <p class="v6-perf-note">⚠️ 장중 점수는 실시간 체결가가 아닙니다. 공개 차트에 저장한 확정 일봉만으로 계산하므로 <b>14:30 → 당일 종가 수익률</b>은 구할 수 없어요. 당일 등락률은 전일 종가 대비, 다음날 변화율은 <b>신호 당일 종가 대비</b>입니다. 매수·매도 체결, 수수료·슬리피지, 55종목 외의 종목, 생존편향은 반영하지 않은 관찰 통계예요. 저장된 날짜·종목별 신호는 서로 독립적인 관측값이 아닙니다.</p>
+    </details>
     <div class="v6-tools">
       <div class="v6-search-block">
         <label for="v6query">이름 또는 종목코드 검색</label>
@@ -1172,6 +1217,7 @@ async function load(){
     const d=await r.json();
     if(!Array.isArray(d.rows))throw Error('데이터 형식이 올바르지 않습니다.');
     dataRows=d.rows;infoDate=d.asof||'-';v7ExpectedAsOf=d.expected_asof||'-';clearChartCacheIfDateChanged();countShown=20;displayBacktest(d.backtest);v6Render();if(v7AnalysisDate!==infoDate)v7Clear();
+    if(v6Loaded||v6PerfHistory.length)v6PerfLoad();
     const expected=d.expected_asof||'-';
     const lag=Number(d.lag_sessions||0);
     const stale=d.data_status==='delayed' || (expected!=='-' && infoDate<expected);
@@ -1293,8 +1339,125 @@ async function v6Load(){
     document.getElementById('v6count').textContent='–';document.getElementById('v6pass').textContent='–';
     document.getElementById('v6status').textContent='아직 표시할 v6 점수가 없습니다: '+e.message;
     document.getElementById('v6fresh').textContent='⚠️ v6 장중 점수는 평일 오후 2시 30분 별도의 NH증권 API 워크플로가 성공해 파일을 게시해야 나타납니다. 검색창에서는 과거 확정 일봉을 조회할 수 있지만 장중 시세가 아닙니다.';
-  }finally{btn.disabled=false;v6Render();}
+  }finally{btn.disabled=false;v6Render();v6PerfLoad();}
 }
+
+/* v8.3: Archive derived v6 scores once per valid session and validate using published EOD OHLCV only. */
+let v6PerfHistory=[],v6PerfLoadingToken=0;
+const V6_PERF_SCHEMA='jongbe-v6-performance-history-v1';
+function v6PerfPercent(x){return x===null||!Number.isFinite(x)?'대기':`${x>0?'+':''}${x.toFixed(2)}%`;}
+function v6PerfIsDate(s){return /^\d{4}-\d{2}-\d{2}$/.test(String(s||''));}
+function v6PerfSnapshot(raw){
+  if(!raw||!v6PerfIsDate(raw.session_date)||!Array.isArray(raw.rows))return null;
+  const rows=raw.rows.filter(r=>r&&/^\d{6}$/.test(String(r.code))&&typeof r.name==='string'&&
+    Number.isInteger(r.score)&&r.score>=0&&r.score<=100).map(r=>({
+      code:String(r.code),name:String(r.name),score:r.score,caution:typeof r.caution==='string'?r.caution:''
+    }));
+  return {session_date:raw.session_date,generated_kst:String(raw.generated_kst||''),rows};
+}
+async function v6PerfFetchHistory(){
+  const url='https://api.github.com/repos/parksunghwa77/jongbe-scanner/contents/v6-history.json?ref=main';
+  const r=await fetch(url,{cache:'no-store',headers:{Accept:'application/vnd.github+json'}});
+  if(r.status===404)return [];
+  if(!r.ok)throw Error('저장된 점수 기록을 조회하지 못했어요 (HTTP '+r.status+').');
+  const body=await r.json();
+  if(typeof body.content!=='string')throw Error('점수 기록 형식이 달라요.');
+  const bin=atob(body.content.replace(/\s/g,''));
+  const d=JSON.parse(new TextDecoder().decode(Uint8Array.from(bin,c=>c.charCodeAt(0))));
+  if(d.schema!==V6_PERF_SCHEMA||!Array.isArray(d.snapshots))throw Error('점수 기록 버전이 일치하지 않아요.');
+  return d.snapshots.map(v6PerfSnapshot).filter(Boolean);
+}
+function v6PerfMerged(history){
+  const byDate=new Map();
+  for(const s of history){if(!byDate.has(s.session_date)||s.generated_kst<byDate.get(s.session_date).generated_kst)byDate.set(s.session_date,s);}
+  // Historical archive may not yet exist: use the current published snapshot provisionally.
+  const today=v6PerfSnapshot(v6Loaded);
+  if(today&&(!byDate.has(today.session_date)||today.generated_kst<byDate.get(today.session_date).generated_kst))byDate.set(today.session_date,today);
+  return [...byDate.values()].sort((a,b)=>a.session_date.localeCompare(b.session_date));
+}
+async function v6PerfCheck(signal){
+  let series;
+  try{series=await getChartSeries(signal.code);}catch(e){return {...signal,closePct:null,position:null,openGapPct:null,nextClosePct:null,nextDayPct:null,nextDate:'',status:'일봉 자료 없음'};}
+  const i=series.findIndex(r=>r[0]===signal.session_date);
+  if(i<0){return {...signal,closePct:null,position:null,openGapPct:null,nextClosePct:null,nextDayPct:null,nextDate:'',
+    status:infoDate<signal.session_date?'당일 확정 일봉 대기':'해당 날짜 거래 자료 없음'};}
+  const curr=series[i],prev=i>0?series[i-1]:null,next=series[i+1];
+  const close=curr[4],prior=prev?.[4];
+  const closePct=Number.isFinite(prior)&&prior>0?100*(close/prior-1):null;
+  const position=curr[2]>curr[3]?100*(close-curr[3])/(curr[2]-curr[3]):null;
+  const openGapPct=next?.[1]>0?100*(next[1]/close-1):null;
+  const nextClosePct=next?.[4]>0?100*(next[4]/close-1):null;
+  const nextDayPct=next?.[1]>0?100*(next[4]/next[1]-1):null;
+  return {...signal,closePct,position,openGapPct,nextClosePct,nextDayPct,nextDate:next?.[0]||'',
+    signalClose:close,nextOpenPrice:next?.[1]??null,nextClosePrice:next?.[4]??null,
+    status:next?'다음 기록 거래일 확인':'다음 거래일 일봉 대기'};
+}
+function v6PerfRender(results,sourceNote){
+  const report=$('v6perfSummary');report.replaceChildren();
+  const confirmed=results.filter(x=>x.nextClosePct!==null&&Number.isFinite(x.nextClosePct));
+  const sameDay=results.filter(x=>x.closePct!==null&&Number.isFinite(x.closePct));
+  const avg=confirmed.length?confirmed.reduce((s,x)=>s+x.nextClosePct,0)/confirmed.length:null;
+  const hit=sameDay.length?100*sameDay.filter(x=>x.closePct>0).length/sameDay.length:null;
+  const nextHit=confirmed.length?100*confirmed.filter(x=>x.nextClosePct>0).length/confirmed.length:null;
+  const metrics=[
+    [String(results.length),'기록된 신호'],
+    [hit===null?'대기':hit.toFixed(1)+'%','당일 상승 마감 비율 ('+sameDay.length+'건)'],
+    [nextHit===null?'대기':nextHit.toFixed(1)+'%','다음 거래일 상승 비율 ('+confirmed.length+'건)'],
+    [v6PerfPercent(avg),'다음 거래일 종가 평균 변화']
+  ];
+  for(const [value,label] of metrics){const div=v6El('div');div.append(v6El('strong','',value),v6El('span','',label));report.append(div);}
+  const status=$('v6perfStatus');
+  status.textContent=`${sourceNote}\n공개 확정 일봉 기준: ${infoDate||'미확인'} · 다음 거래일 결과는 일봉이 갱신된 뒤 확인합니다. 각 종목/일자의 중복 신호를 포함하는 관찰 통계예요.`;
+  const out=$('v6perfRows');out.replaceChildren();
+  if(!results.length){out.append(v6El('p','v6-perf-warning','선택한 점수의 기록이 아직 없어요. 최초 설치 후 점수 기록이 누적되면 여기에 나타납니다.'));return;}
+  for(const x of results.slice(0,18)){
+    const card=v6El('article','v6-perf-row');
+    const head=v6El('h4','',`${x.name} (${x.code}) · ${x.score}점`);
+    card.append(head,v6El('small','',`📅 ${x.session_date} · 관찰 작업 ${x.generated_kst||'시각 미확인'} · ${x.status}`));
+    if(x.signalClose)card.append(v6El('div','v6-perf-prices',`당일 확정 종가 ${fmt(x.signalClose)}원 · 다음 기록 거래일 종가 ${x.nextClosePrice?fmt(x.nextClosePrice)+'원':'대기'}`));
+    const facts=v6El('div','v6-perf-facts');
+    const fields=[
+      ['당일 등락률 (전일 종가 대비)',x.closePct],
+      ['당일 종가 위치',x.position],
+      ['다음 거래일 시가 갭',x.openGapPct],
+      ['다음 거래일 종가 변화',x.nextClosePct]
+    ];
+    for(const [label,value] of fields){const div=v6El('div');div.append(v6El('span','',label),document.createElement('br'));
+      const resultText=(label==='당일 종가 위치'&&Number.isFinite(value))?value.toFixed(1)+'%':v6PerfPercent(value);
+      div.append(v6El('b',value===null?'pending':value>0?'gain':value<0?'loss':'',resultText));facts.append(div);}
+    card.append(facts);
+    if(x.nextDate)card.append(v6El('small','',`다음 기록 거래일 ${x.nextDate} · 다음날 시가→종가 ${v6PerfPercent(x.nextDayPct)}`));
+    out.append(card);
+  }
+  if(results.length>18)out.append(v6El('p','v6-perf-note',`최근 18개 신호만 카드로 표시합니다. 전체 ${results.length}개 신호는 위 집계에 포함됩니다.`));
+}
+async function v6PerfLoad(){
+  const token=++v6PerfLoadingToken;
+  const button=$('v6perfRefresh');button.disabled=true;
+  $('v6perfStatus').textContent='📊 점수 기록과 확정 일봉을 확인 중…';
+  try{
+    const archived=await v6PerfFetchHistory();
+    if(token!==v6PerfLoadingToken)return;
+    v6PerfHistory=v6PerfMerged(archived);
+    const threshold=Number($('v6perfMin').value);
+    const selected=v6PerfHistory.slice(-60).reverse().flatMap(s=>s.rows.filter(x=>x.score>=threshold&&!x.caution).map(x=>({...x,session_date:s.session_date,generated_kst:s.generated_kst})));
+    const limited=selected.slice(0,160);
+    // Do not guess day-end returns from an intraday score. Wait until public EOD charts include that date.
+    const results=[];
+    for(let i=0;i<limited.length;i+=4){
+      const part=await Promise.all(limited.slice(i,i+4).map(v6PerfCheck));
+      if(token!==v6PerfLoadingToken)return;
+      results.push(...part);
+    }
+    const note=`기록 ${v6PerfHistory.length}거래일 · ${threshold}점 이상 / 급변 위험 제외 · 최근 ${Math.min(60,v6PerfHistory.length)}일 / 최대 160신호${selected.length>160?' (초과 기록 제외)':''} · ${archived.length?'GitHub 일별 기록':'현재 게시된 점수 임시 표시'}`;
+    v6PerfRender(results,note);
+  }catch(e){
+    if(token!==v6PerfLoadingToken)return;
+    $('v6perfStatus').textContent='⚠️ 사후 검증 자료를 불러오지 못했어요: '+e.message;
+    $('v6perfRows').replaceChildren(v6El('p','v6-perf-warning','GitHub 파일 게시 상태와 v5 확정 일봉을 확인해 주세요.'));
+  }finally{if(token===v6PerfLoadingToken)button.disabled=false;}
+}
+
 // v7.2 cloud lab: confirmed public OHLCV only; no API keys, no intraday prices.
 // Historical return is close(t+1)/close(t)-1, not an executable trading return.
 let v7Results=[],v7Failures=[],v7Backtest=[],v7AnalysisDate='',v7Running=false;
@@ -2078,6 +2241,8 @@ $('v7clearButton').addEventListener('click',()=>{
   requestAnimationFrame(()=>$('v7count').parentElement.scrollIntoView({behavior:'smooth',block:'start'}));
 });
 $('v6refresh').addEventListener('click',v6Load);
+$('v6perfRefresh').addEventListener('click',v6PerfLoad);
+$('v6perfMin').addEventListener('change',v6PerfLoad);
 $('v7refresh').addEventListener('click',()=>{v7Clear();v7Load();});
 ['v71segment','v71market','v71breadth','v71cost','v72slip'].forEach(id=>$(id).addEventListener('change',v71Render));
 ['v73period','v73score','v73market','v73liquid','v73rise','v73cost','v73slip'].forEach(id=>$(id).addEventListener('change',v73Render));
