@@ -19,7 +19,7 @@ jobs:
           python-version: "3.11"
 
       - name: Install dependencies
-        run: pip install finance-datareader pandas requests
+        run: pip install finance-datareader pandas requests pyarrow
 
       - name: Test Naver stock data
         run: python test_naver_crosscheck.py
