@@ -78,7 +78,7 @@ def download_year(year: int) -> pd.DataFrame:
             if len(r.content) < 1_000_000:
                 raise ValueError(f'원본이 비정상적으로 작음: {len(r.content)} bytes')
             df = pd.read_parquet(BytesIO(r.content))
-            log.info('%s 데이터 로드: %,d행, %s', year, len(df), ','.join(map(str, df.columns)))
+    log.info('%s 데이터 로드: %s행, %s', year, f'{len(df):,}', ','.join(map(str, df.columns)))
             return df
         except Exception as exc:
             errors.append(f'{type(exc).__name__}: {exc}')
