@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="theme-color" content="#f4f8ff">
-  <title>종베 스캐너 v8.6 · 적삼병·흑삼병 분석</title>
+  <title>종베 스캐너 v8.7 · 자동 시세 관찰 · 패턴별 조건 검증</title>
   <style>
     :root{color-scheme:light}*{box-sizing:border-box}
     body{margin:0;background:#101827;color:#f3f6fe;font-family:system-ui,-apple-system,"Noto Sans KR",sans-serif}
@@ -392,7 +392,7 @@
   </style>
 </head>
 <body><main>
-  <h1 class="app-title">📈 종베 스캐너 <span>v8.6</span></h1>
+  <h1 class="app-title">📈 종베 스캐너 <span>v8.7</span></h1>
   <div class="status-pill">🔎 읽기 전용 · 투자 추천 아님</div>
   <nav class="switcher" aria-label="분석 화면 선택">
     <button id="tabv6" type="button" class="selected" aria-pressed="true">v6 장중 관찰</button>
@@ -436,6 +436,13 @@
       <p class="v6-perf-note">⚠️ 장중 점수는 실시간 체결가가 아닙니다. 공개 차트에 저장한 확정 일봉만으로 계산하므로 <b>14:30 → 당일 종가 수익률</b>은 구할 수 없어요. 당일 등락률은 전일 종가 대비, 다음날 변화율은 <b>신호 당일 종가 대비</b>입니다. 매수·매도 체결, 수수료·슬리피지, 55종목 외의 종목, 생존편향은 반영하지 않은 관찰 통계예요. 저장된 날짜·종목별 신호는 서로 독립적인 관측값이 아닙니다.</p>
     </details>
 
+
+    <details class="v85-panel" id="v87autoPanel"><summary>📡 v8.7 · 나무증권 자동 시세 수집 (별도 검증)</summary>
+      <p>GitHub Actions에서 09:15·09:30·09:45·10:15에 나무증권의 현재가를 자동 조회하도록 구성했습니다. <b>이 자료는 1분봉 시가가 아닌 조회 시점의 현재가 스냅샷</b>입니다. 실행 지연·종목별 조회 시각 차이·API 시세 지연 가능성이 있으므로 09:15 또는 09:30의 실제 1분봉 시가인 것처럼 기존 매도 수익률 표에 혼합하지 않습니다.</p>
+      <p>원본 조회 결과는 공개 사이트에 표시하지 않고 GitHub Actions 실행 내역의 다운로드 가능한 작업 산출물로만 저장합니다. 자동 수집이 작동하려면 기존 나무증권 API Secrets가 유효해야 합니다. GitHub 예약 실행은 지정 시각을 보장하지 않아 허용 시각을 벗어나면 데이터를 만들지 않습니다.</p>
+      <a target="_blank" rel="noopener noreferrer" href="https://github.com/parksunghwa77/jongbe-scanner/actions/workflows/namuh-v87-observe.yml">📁 자동 조회 실행 기록 · 다운로드</a>
+      <p>과거 09:15·09:30 <b>정확한 분봉 시가</b> 비교는 검증된 1분봉 CSV 입력 방식만 사용합니다. 자동 스냅샷을 분봉으로 재명명하지 않습니다.</p>
+    </details>
     <details class="v85-panel" id="v85Panel" aria-label="다음 거래일 매도시각 09:00 09:15 09:30 비교">
       <summary>🕘 v8.5 · 다음 날 09:00 / 09:15 / 09:30 매도 비교</summary>
       <p><b>v6 장중 기록</b>을 신호로 고정하고, 신호일 <b>확정 종가 매수 가정</b>에서 다음 거래일 KRX 정규장 시각별 매도 결과를 비교합니다. <b>09:00은 공개 일봉의 시가</b>를 사용합니다. 09:15·09:30은 별도로 확보한 <b>1분봉 시작가 CSV</b>가 있어야 비교할 수 있어요. 분봉 자료가 없으면 임의로 계산하지 않습니다.</p>
@@ -2578,6 +2585,7 @@ v6Load();
   const insertBefore = document.querySelector('section.filters[aria-label="검색 조건"]');
   if(insertBefore) insertBefore.before(panel);
   else (document.querySelector('main') || document.body).append(panel);
+  panel.insertAdjacentHTML('afterend', '\n<section id="v87-research" style="background:#f1f8fc;border:1px solid #a8c8e1;border-radius:15px;padding:16px;margin:20px 0;color:#25415d">\n<h2>📊 v8.7 · 적삼병·흑삼병 조건별 사후검증</h2>\n<p>패턴 발생 <b>그날까지의 확정 일봉</b>으로 종베 점수와 거래량을 다시 계산해 비교합니다. 현재 점수를 과거 신호에 대입하지 않습니다.</p>\n<div class="filters" style="margin:10px 0">\n<label>패턴<select id="v87type"><option value="red">🔴 적삼병</option><option value="black">⚫ 흑삼병</option><option value="all">둘 다</option></select></label>\n<label>시장<select id="v87market"><option value="ALL">전체</option><option value="KOSPI">코스피</option><option value="KOSDAQ">코스닥</option></select></label>\n<label>몸통 조건<select id="v87strict"><option value="basic">기본 ≥40%</option><option value="strict">엄격 ≥60%</option></select></label>\n<label>최소 거래량 배율<select id="v87vol"><option value="0">제한 없음</option><option value="1">1.0배 이상</option><option value="1.5" selected>1.5배 이상</option><option value="2">2배 이상</option></select></label>\n<label>당시 종베 점수<select id="v87score"><option value="0">제한 없음</option><option value="60">60점 이상</option><option value="80" selected>80점 이상</option><option value="100">100점</option></select></label>\n<label>가상 왕복 비용<select id="v87cost"><option value="0">비용 제외</option><option value="0.3">0.3%p</option><option value="0.5" selected>0.5%p</option><option value="0.7">0.7%p</option></select></label>\n</div>\n<button type="button" id="v87go">📈 조건별 과거 성과 비교</button>\n<p id="v87status" role="status" style="font-size:13px">선택한 조건을 분석합니다. 미래 데이터는 신호 생성에 사용하지 않습니다.</p>\n<div id="v87summary" style="overflow-x:auto"></div>\n<details style="margin-top:10px"><summary>📅 발생 날짜별 관측 결과</summary><div id="v87days" style="overflow-x:auto"></div></details>\n<small style="display:block;margin-top:12px;line-height:1.7">⚠️ 과거 관측 통계로 미래 가격을 예측하지 않습니다. 1일봉에 없는 09:15·09:30분 가격은 자동 생성하지 않습니다. 나무증권 API 1분봉 수집과 09:45·10:15 자동 예약은 <b>아직 연동되지 않았습니다.</b> 기존 v8.5의 검증된 1분봉 CSV 입력 기능은 유지됩니다. 생존편향·동일 날짜 중복 종목·시장 국면 차이에 주의하세요.</small>\n</section>\n');
   function detect(rows, i, strict) {
     if(i<2)return null;
     const v=rows.slice(i-2,i+1).map(r=>({d:r[0],o:+r[1],h:+r[2],l:+r[3],c:+r[4],volume:+r[5]}));
@@ -2655,5 +2663,77 @@ v6Load();
   });
 })();
 
+</script>
+
+<script>
+/* v8.7: point-in-time pattern segmentation. Does NOT invent minute data. */
+(()=>{'use strict';
+const $=id=>document.getElementById(id), money=n=>Number(n).toLocaleString('ko-KR');
+const safe=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+function pattern(rows,i,strict){
+ if(i<2)return null;
+ const bars=rows.slice(i-2,i+1).map(r=>({date:r[0],o:+r[1],h:+r[2],l:+r[3],c:+r[4],v:+r[5]}));
+ if(bars.some(b=>!Number.isFinite(b.o+b.h+b.l+b.c+b.v)||b.o<=0||b.c<=0||b.h<=b.l))return null;
+ for(const type of ['red','black']){
+  const up=type==='red';
+  if(!bars.every(b=>(up?b.c>b.o:b.c<b.o)&&Math.abs(b.c-b.o)/(b.h-b.l)>=(strict?.6:.4)))continue;
+  if(!((up?bars[0].c<bars[1].c&&bars[1].c<bars[2].c:bars[0].c>bars[1].c&&bars[1].c>bars[2].c)))continue;
+  if(![1,2].every(j=>{const p=bars[j-1],c=bars[j];return c.o>=Math.min(p.o,p.c)&&c.o<=Math.max(p.o,p.c)&&(!strict||(up?c.h>p.h&&c.l>=p.l:c.l<p.l&&c.h<=p.h));}))continue;
+  const prior=rows.slice(Math.max(0,i-22),i-2).map(r=>+r[5]).filter(v=>v>0&&Number.isFinite(v));
+  const volume=prior.length>=5?(bars.reduce((a,b)=>a+b.v,0)/3)/(prior.reduce((a,b)=>a+b,0)/prior.length):null;
+  return {type,volume,date:bars[2].date,close:bars[2].c};
+ }
+ return null;
+}
+function scoreAt(rows,i){
+ if(i<54)return null;const recent=rows.slice(i-54,i+1);
+ const close=+recent.at(-1)[4],prev=+recent.at(-2)[4],lo=+recent.at(-1)[3],hi=+recent.at(-1)[2];
+ const avg=(n)=>recent.slice(-n).reduce((s,r)=>s+(+r[4]),0)/n;
+ const volavg=recent.slice(0,-1).reduce((s,r)=>s+(+r[5]),0)/54;
+ const vol=+recent.at(-1)[5];
+ if(![close,prev,lo,hi,volavg,avg(5),avg(20)].every(Number.isFinite)||prev<=0||hi<=lo||volavg<=0)return null;
+ return (close>avg(5)?25:0)+(avg(5)>avg(20)?25:0)+(vol>volavg*1.5?20:0)+((close-lo)/(hi-lo)>=.75?20:0)+(close>prev?10:0);
+}
+function stats(events,key,cost){
+ const vals=events.map(e=>e[key]-cost).filter(Number.isFinite).sort((a,b)=>a-b);const n=vals.length;
+ if(!n)return {n:0,avg:'–',median:'–',win:'–',worst:'–'};
+ const avg=vals.reduce((a,b)=>a+b,0)/n,median=n%2?vals[(n-1)/2]:(vals[n/2-1]+vals[n/2])/2;
+ return {n,avg:avg.toFixed(2)+'%',median:median.toFixed(2)+'%',win:(100*vals.filter(v=>v>0).length/n).toFixed(1)+'%',worst:vals[0].toFixed(2)+'%'};
+}
+function row(caption,events,cost){const op=stats(events,'openPct',cost),cl=stats(events,'closePct',cost);return `<tr><td>${caption}</td><td>${money(cl.n)}</td><td>${op.avg}</td><td>${cl.avg}</td><td>${cl.median}</td><td>${cl.win}</td><td>${cl.worst}</td></tr>`;}
+$('v87go').addEventListener('click',async()=>{
+ const button=$('v87go'),status=$('v87status'),output=$('v87summary'),days=$('v87days');button.disabled=true;output.replaceChildren();days.replaceChildren();
+ try{
+  if(!Array.isArray(dataRows)||!dataRows.length||!infoDate)throw Error('v5 분석 데이터가 없습니다.');
+  const kind=$('v87type').value,market=$('v87market').value,strict=$('v87strict').value==='strict';
+  const minVol=+$('v87vol').value,minScore=+$('v87score').value,cost=+$('v87cost').value;
+  const groups=new Map();let failure=0,done=0;const events=[];
+  for(const stock of dataRows){if(market!=='ALL'&&stock.market!==market)continue;let pre=String(stock.code).slice(0,2);if(!groups.has(pre))groups.set(pre,[]);groups.get(pre).push(stock);}
+  const entries=[...groups.entries()];
+  for(let start=0;start<entries.length;start+=4){
+   await Promise.all(entries.slice(start,start+4).map(async([prefix,stocks])=>{
+    try{
+     const r=await fetch('./charts/'+prefix+'.json?asof='+encodeURIComponent(infoDate),{cache:'no-store'});if(!r.ok)throw Error('HTTP '+r.status);
+     const bundle=await r.json();if(bundle.schema!=='jongbe-ohlcv-v1'||bundle.asof!==infoDate||!bundle.stocks)throw Error('차트 기준일 불일치');
+     for(const stock of stocks){const bars=bundle.stocks[String(stock.code)];if(!Array.isArray(bars))continue;
+      for(let i=54;i<bars.length-1;i++){
+       const p=pattern(bars,i,strict);if(!p||(kind!=='all'&&p.type!==kind))continue;
+       const score=scoreAt(bars,i);if(score===null||p.volume===null)continue;
+       const next=bars[i+1];if(!(next&&+next[1]>0&&+next[4]>0))continue;
+       events.push({...p,score,market:stock.market,stock:stock.name,code:stock.code,openPct:(+next[1]/p.close-1)*100,closePct:(+next[4]/p.close-1)*100});
+      }
+     }
+    }catch(e){failure++;}finally{done++;status.textContent=`분석 중 ${done}/${entries.length}묶음 · ${money(events.length)}건`;}
+   }));
+  }
+  const eligible=events.filter(e=>(minVol===0||e.volume>=minVol)&&e.score>=minScore);
+  const rows=[['패턴 전체',events],['거래량 조건만',events.filter(e=>minVol===0||e.volume>=minVol)],['당시 점수 조건만',events.filter(e=>e.score>=minScore)],['거래량 + 당시 점수',eligible]];
+  output.innerHTML=`<div style="overflow-x:auto"><table class="history" style="min-width:650px"><thead><tr><th>조건</th><th>사례 수</th><th>익일 시가 평균</th><th>익일 종가 평균</th><th>종가 중앙값</th><th>종가 상승률</th><th>최악 사례</th></tr></thead><tbody>${rows.map(x=>row(x[0],x[1],cost)).join('')}</tbody></table></div>`;
+  const grouped=new Map();for(const e of eligible){if(!grouped.has(e.date))grouped.set(e.date,[]);grouped.get(e.date).push(e);}
+  days.innerHTML=`<table class="history"><thead><tr><th>발생일</th><th>사례</th><th>익일 종가 평균(비용 차감)</th></tr></thead><tbody>${[...grouped.entries()].sort((a,b)=>b[0].localeCompare(a[0])).slice(0,50).map(([date,rows])=>`<tr><td>${safe(date)}</td><td>${rows.length}</td><td>${stats(rows,'closePct',cost).avg}</td></tr>`).join('')}</tbody></table>`;
+  status.textContent=`기준일 ${infoDate} · 확정 일봉 ${money(events.length)}패턴 관측 · 결합 조건 ${money(eligible.length)}건 · ${failure?'⚠️ '+failure+'개 데이터 묶음 누락':'전체 묶음 조회 완료'}. 조건별 결과는 중복·선택편향을 제거하지 않은 연구용 가상 성과입니다.`;
+ }catch(e){status.textContent='오류: '+e.message;}finally{button.disabled=false;}
+});
+})();
 </script>
 </body></html>
