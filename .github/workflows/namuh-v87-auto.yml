@@ -1,0 +1,72 @@
+name: Jongbe v8.7 Auto Observation
+
+on:
+  workflow_dispatch:
+    inputs:
+      target_time:
+        description: "Observation time (KST)"
+        required: true
+        default: "09:15"
+        type: choice
+        options:
+          - "09:15"
+          - "09:30"
+          - "09:45"
+          - "10:15"
+
+  schedule:
+    # UTC 기준, 한국시간은 +9시간
+    - cron: "15 0 * * 1-5"
+    - cron: "30 0 * * 1-5"
+    - cron: "45 0 * * 1-5"
+    - cron: "15 1 * * 1-5"
+
+permissions:
+  contents: read
+
+jobs:
+  observe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    env:
+      NHPLUG_APP_KEY: ${{ secrets.NAMUH_APP_KEY }}
+      NHPLUG_APP_SECRET: ${{ secrets.NAMUH_APP_SECRET_KEY }}
+      NHPLUG_BASE_URL: https://api.nhplug.com:8443
+      NHPLUG_AUTH_URL: https://api.nhplug.com:8443
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          pip install nhplug exchange_calendars
+
+      - name: Select observation time
+        env:
+          SCHEDULE: ${{ github.event.schedule }}
+          MANUAL_TIME: ${{ inputs.target_time }}
+        run: |
+          case "$SCHEDULE" in
+            "15 0 * * 1-5") TARGET="09:15" ;;
+            "30 0 * * 1-5") TARGET="09:30" ;;
+            "45 0 * * 1-5") TARGET="09:45" ;;
+            "15 1 * * 1-5") TARGET="10:15" ;;
+            *) TARGET="${MANUAL_TIME:-09:15}" ;;
+          esac
+          echo "TARGET_TIME=$TARGET" >> "$GITHUB_ENV"
+
+      - name: Collect market observations
+        run: python namuh_v87_observe.py
+
+      - name: Save observation files
+        uses: actions/upload-artifact@v4
+        with:
+          name: observation-${{ github.run_id }}
+          path: minute-observations/*.csv
+          if-no-files-found: ignore
+          retention-days: 7
