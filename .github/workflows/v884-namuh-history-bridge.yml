@@ -1,0 +1,173 @@
+name: V8.8.4 NH historical bridge readiness (read-only)
+
+on:
+  push:
+    branches: [v8.8.4-test]
+    paths:
+      - '.github/workflows/v884-namuh-history-bridge.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  history-readiness:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      NHPLUG_APP_KEY: ${{ secrets.NAMUH_APP_KEY }}
+      NHPLUG_APP_SECRET: ${{ secrets.NAMUH_APP_SECRET_KEY }}
+      NHPLUG_BASE_URL: https://api.nhplug.com:8443
+      NHPLUG_AUTH_URL: https://api.nhplug.com:8443
+      NHPLUG_RATE_LIMIT: '2'
+    steps:
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install supported NH SDK and market calendar
+        run: python -m pip install --disable-pip-version-check 'nhplug==0.4.1' 'exchange-calendars>=4.9,<5'
+      - name: Check NH regular-session history depth without changing scanner
+        shell: bash
+        run: |
+          python - <<'PY'
+          """Read-only bridge readiness probe. Never log tokens or full quote responses.
+
+          Future integration must have a same-source 452-session chart history, so
+          it must NOT append only one NH day to 452 Marcap days. This script tests
+          whether NH currentDaily can supply enough complete sessions.
+          """
+          import json, os, re, time
+          from datetime import datetime, date
+          from pathlib import Path
+          from zoneinfo import ZoneInfo
+          import exchange_calendars as xcals
+          import pandas as pd
+          from nhplug import call
+
+          TARGET = '2026-10-30'
+          REQUESTED = 452
+          STOCKS = [('005930','삼성전자'),('000660','SK하이닉스')]
+          OUTPUT = Path('v884-namuh-history-bridge.json')
+
+          def day(raw):
+              s=str(raw or '').strip()
+              for fmt in ('%y/%m/%d','%Y-%m-%d','%Y%m%d','%Y/%m/%d','%y%m%d'):
+                  try:
+                      d=datetime.strptime(s,fmt).date()
+                      return d.isoformat() if 2020<=d.year<=2030 else None
+                  except ValueError: pass
+              return None
+
+          def number(v, zero_ok=False):
+              s=str(v if v is not None else '').strip().replace(',','')
+              if not re.fullmatch(r'\d{1,14}',s):return None
+              n=int(s)
+              return n if (n>=0 if zero_ok else n>0) else None
+
+          def parse_bars(rows):
+              valid={}; duplicates=0; invalid=0
+              if not isinstance(rows,list):
+                  return valid,duplicates,invalid
+              for row in rows:
+                  if not isinstance(row,dict):invalid+=1;continue
+                  d=day(row.get('bsop_date'))
+                  o=number(row.get('stck_oprc'))
+                  h=number(row.get('stck_hgpr'))
+                  l=number(row.get('stck_lwpr'))
+                  c=number(row.get('stck_clpr'))
+                  v=number(row.get('acml_vol'),zero_ok=True)
+                  if not d or None in (o,h,l,c,v) or not (l<=o<=h and l<=c<=h):
+                      invalid+=1;continue
+                  if d in valid:duplicates+=1
+                  valid[d] = (o,h,l,c,v)
+              return valid,duplicates,invalid
+
+          def consecutive_dates(bars, through):
+              """Count uninterrupted XKRX sessions backwards, ending at through."""
+              if through not in bars:return 0
+              cal=xcals.get_calendar('XKRX')
+              last=pd.Timestamp(through)
+              first=last-pd.Timedelta(days=900)
+              expected=cal.sessions_in_range(first,last)
+              run=0
+              for ts in reversed(expected):
+                  if ts.date().isoformat() not in bars:break
+                  run+=1
+              return run
+
+          def test_parsers():
+              assert day('26/10/30') == TARGET
+              assert day('2026-10-30') == TARGET
+              assert day('26/13/30') is None
+              example=[{'bsop_date':'26/10/30','stck_oprc':'100','stck_hgpr':'110',
+                        'stck_lwpr':'90','stck_clpr':'105','acml_vol':'1,000'}]
+              bars,dups,invalid=parse_bars(example)
+              assert list(bars)==[TARGET] and dups==0 and invalid==0
+              assert consecutive_dates(bars,TARGET)==1
+              bad=[dict(example[0],stck_clpr='111')]
+              assert parse_bars(bad)[2]==1
+
+          test_parsers()
+          report={'schema':'jongbe-v884-namuh-bridge-readiness-v1',
+                  'generated_at_kst':datetime.now(ZoneInfo('Asia/Seoul')).isoformat(timespec='seconds'),
+                  'target_session':TARGET,'market_cd':'KRX','view_main_yn':'Y',
+                  'requested_history_bars':REQUESTED,'stocks':[],
+                  'technical_signal_sessions_required':205,
+                  'full_chart_sessions_required':452,
+                  'public_site_updated':False,'trades_or_account_accessed':False,
+                  'notes':['NH data is queried for a private diagnostic only.',
+                           'No quote values or raw API responses are stored or printed.',
+                           'Different Marcap and NH close definitions must not be merged blindly.',
+                           'Historical data availability does not grant public redistribution rights.']}
+          if not os.getenv('NHPLUG_APP_KEY') or not os.getenv('NHPLUG_APP_SECRET'):
+              raise SystemExit('NHPLUG GitHub Secrets missing; no credentials printed.')
+          for code,name in STOCKS:
+              record={'code':code,'name':name,'status':'not_checked',
+                      'returned_rows':0,'valid_unique_rows':0,'invalid_bars':0,'duplicate_dates':0,
+                      'latest_day':None,'earliest_day':None,'target_present':False,
+                      'continuous_sessions_to_target':0,'signals_ready':False,'full_chart_ready':False}
+              try:
+                  answer=call('/krstock/quote/v1/currentDaily',{
+                      'market_cd':'KRX','iem_cd':code,
+                      'array_cnt':str(REQUESTED),'view_main_yn':'Y'})
+                  rows=answer.get('Output_0') if isinstance(answer,dict) else None
+                  if isinstance(rows,dict):rows=[rows]
+                  if not isinstance(rows,list):rows=[]
+                  bars,dups,invalid=parse_bars(rows)
+                  days=sorted(bars)
+                  n=consecutive_dates(bars,TARGET)
+                  record.update({'status':'parsed' if days else 'no_valid_rows',
+                                 'returned_rows':len(rows),'valid_unique_rows':len(bars),
+                                 'invalid_bars':invalid,'duplicate_dates':dups,
+                                 'latest_day':days[-1] if days else None,
+                                 'earliest_day':days[0] if days else None,
+                                 'target_present':TARGET in bars,
+                                 'continuous_sessions_to_target':n,
+                                 'signals_ready':n>=205,
+                                 'full_chart_ready':n>=452})
+              except Exception as exc:
+                  record.update({'status':'request_failed','error_type':type(exc).__name__})
+              report['stocks'].append(record)
+              print(f'{name} {code}: status={record["status"]}, rows={record["returned_rows"]}, '
+                    f'continuous={record["continuous_sessions_to_target"]}, '
+                    f'205-day={record["signals_ready"]}, 452-day={record["full_chart_ready"]}',flush=True)
+              time.sleep(.8)
+          report['source_bridge_ready_for_same_vendor_chart']=all(s['full_chart_ready'] for s in report['stocks'])
+          OUTPUT.write_text(json.dumps(report,ensure_ascii=False,indent=2)+'\n',encoding='utf-8')
+          print('SUMMARY '+json.dumps({
+              'stocks_checked':len(report['stocks']),
+              'with_target':sum(s['target_present'] for s in report['stocks']),
+              'signal_history_ready':sum(s['signals_ready'] for s in report['stocks']),
+              'full_chart_history_ready':sum(s['full_chart_ready'] for s in report['stocks']),
+              'scanner_modified':False},ensure_ascii=False),flush=True)
+          print('Probe finished. No source switch or public quote publication was performed.')
+          PY
+      - name: Save public-data-free diagnostic
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: v884-namuh-history-bridge-${{ github.run_id }}
+          path: v884-namuh-history-bridge.json
+          if-no-files-found: warn
+          retention-days: 7
