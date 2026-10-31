@@ -1,0 +1,311 @@
+name: V8.8.4 investigate price vendors 5 days (read-only)
+
+on:
+  push:
+    branches: [v8.8.4-test]
+    paths:
+      - '.github/workflows/v884-vendor-five-days.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  compare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 18
+    steps:
+      - name: Checkout V8.8.4 test branch
+        uses: actions/checkout@v4
+      - name: Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install read-only market-data clients
+        run: python -m pip install 'pandas>=2.2,<3' 'pyarrow>=17,<24' 'requests>=2.32,<3' 'finance-datareader>=0.9.200'
+      - name: Compare last five shared sessions and record discrepancies
+        shell: bash
+        run: |
+          cat > /tmp/v884_vendor_diagnose.py <<'PYTHON'
+          #!/usr/bin/env python3
+          """Jongbe v8.8.4 third-stage cross-vendor price diagnostics (READ-ONLY).
+
+          Compares five shared KRX trading dates of NAVER daily bars against the
+          FinanceData/marcap parquet dataset used by the existing scanner. Reports
+          OHLCV differences without attributing them to NXT, KRX afterhours, or
+          corporate actions in the absence of verified source metadata.
+
+          DOES NOT update scanner.py, results.json, charts, or placed trades.
+          """
+          from __future__ import annotations
+
+          import csv
+          import hashlib
+          import io
+          import json
+          import math
+          import time
+          from datetime import datetime
+          from pathlib import Path
+          from zoneinfo import ZoneInfo
+
+          import FinanceDataReader as fdr
+          import pandas as pd
+          import requests
+
+          TARGET = '2026-10-30'
+          PRIOR = '2026-10-29'
+          START = '2026-10-20'
+          END = '2026-11-02'  # exclusive
+          URL = 'https://raw.githubusercontent.com/FinanceData/marcap/master/data/marcap-2026.parquet'
+          OUTPUT = Path('v884-vendor-report')
+          FIELDS = ('Open', 'High', 'Low', 'Close', 'Volume')
+
+
+          def sample_40(rows):
+              """Match previous V8.8.4 source audit: 20 per market, Samsung/SK included."""
+              result = []
+              for market in ('KOSPI', 'KOSDAQ'):
+                  pool = {str(r.get('code', '')): r for r in rows
+                          if isinstance(r, dict) and r.get('market') == market
+                          and len(str(r.get('code', ''))) == 6 and str(r.get('code', '')).isdigit()}
+                  requested = ['005930', '000660'] if market == 'KOSPI' else []
+                  if any(c not in pool for c in requested):
+                      raise RuntimeError(f'missing required {market} stock in previous snapshot')
+                  leftover = sorted(set(pool) - set(requested))
+                  places = 20 - len(requested)
+                  if len(leftover) < places:
+                      raise RuntimeError(f'insufficient {market} stocks')
+                  picks = [leftover[(i * (len(leftover) - 1)) // max(1, places - 1)]
+                           for i in range(places)]
+                  chosen = requested + picks
+                  if len(set(chosen)) != 20:
+                      raise RuntimeError(f'duplicate {market} sample')
+                  result.extend((market, code, pool[code]) for code in chosen)
+              assert len(result) == 40
+              return result
+
+
+          def clean_bar(row):
+              try:
+                  vals = [float(row[k]) for k in FIELDS]
+              except (KeyError, ValueError, TypeError):
+                  return None
+              if not all(math.isfinite(v) for v in vals):
+                  return None
+              o, h, l, c, v = vals
+              if min(o, h, l, c) <= 0 or not (l <= o <= h and l <= c <= h and v >= 0):
+                  return None
+              return {k: int(round(val)) for k, val in zip(FIELDS, vals)}
+
+
+          def dated_bars(df, codes):
+              """Normalize marcap Date and Code columns to {code: {YYYY-MM-DD: bar}}."""
+              required = {'Date', 'Code', *FIELDS}
+              if not required.issubset(df.columns):
+                  raise RuntimeError(f'marcap columns missing: {sorted(required - set(df.columns))}')
+              frame = df.copy()
+              frame['Date'] = pd.to_datetime(frame['Date'], errors='coerce').dt.date.astype('string')
+              frame['Code'] = frame['Code'].astype(str).str.strip().str.zfill(6)
+              frame = frame[frame['Code'].isin(codes)]
+              frame = frame[(frame['Date'] >= START) & (frame['Date'] <= TARGET)]
+              output = {code: {} for code in codes}
+              for _, row in frame.drop_duplicates(['Date', 'Code'], keep='last').iterrows():
+                  bar = clean_bar(row)
+                  if bar:
+                      output[str(row['Code'])][str(row['Date'])] = bar
+              return output
+
+
+          def fetch_marcap(session, codes):
+              r = session.get(URL, timeout=(20, 100), headers={'Cache-Control': 'no-cache', 'User-Agent': 'JongbeV884Research/1.0'})
+              r.raise_for_status()
+              if not 1_000_000 <= len(r.content) <= 120_000_000:
+                  raise RuntimeError(f'marcap parquet size unexpected: {len(r.content)} bytes')
+              digest = hashlib.sha256(r.content).hexdigest()
+              raw = pd.read_parquet(io.BytesIO(r.content), columns=['Date', 'Code', *FIELDS])
+              source_latest = str(pd.to_datetime(raw['Date']).max().date())
+              data = dated_bars(raw, codes)
+              return data, {'url': URL, 'sha256': digest, 'latest_date': source_latest, 'bytes': len(r.content)}
+
+
+          def compare_days(marcap, naver, dates):
+              entries = []
+              for day in dates:
+                  m, n = marcap.get(day), naver.get(day)
+                  if m is None or n is None:
+                      entries.append({'date': day, 'status': 'missing', 'marcap_available': bool(m), 'naver_available': bool(n)})
+                      continue
+                  mismatch = [col for col in FIELDS if m[col] != n[col]]
+                  close_gap = 100 * (n['Close'] - m['Close']) / m['Close']
+                  entries.append({
+                      'date': day, 'status': 'equal' if not mismatch else 'different',
+                      'marcap': m, 'naver': n, 'differing_fields': mismatch,
+                      'close_gap_pct': round(close_gap, 4),
+                      'ohlc_equal': all(m[c] == n[c] for c in FIELDS[:4]),
+                      'volume_equal': m['Volume'] == n['Volume'],
+                  })
+              return entries
+
+
+          def classify(entries):
+              valid = [e for e in entries if e['status'] != 'missing']
+              if not valid:
+                  return 'NO_OVERLAP'
+              diff = [e for e in valid if e['status'] == 'different']
+              if not diff:
+                  return 'SAME_OHLCV_OVERLAP'
+              if all('Close' not in e['differing_fields'] for e in diff):
+                  return 'CLOSE_MATCH_OTHER_FIELDS_DIFFER'
+              # Stable price ratio is only a candidate for adjusted-price differences.
+              # Requiring at least 3 days + O/H/L/C proportionality reduces false positives.
+              ratios = []
+              for e in valid:
+                  if e['status'] == 'missing':
+                      continue
+                  m, n = e['marcap'], e['naver']
+                  ratios.append([n[k] / m[k] for k in FIELDS[:4]])
+              if len(ratios) >= 3:
+                  all_ratios = [x for arr in ratios for x in arr]
+                  average = sum(all_ratios) / len(all_ratios)
+                  spread = max(abs(v / average - 1) for v in all_ratios)
+                  if abs(average - 1) > 0.005 and spread < 0.0015:
+                      return 'PROPORTIONAL_PRICE_SCALE_CANDIDATE_UNVERIFIED'
+              return 'VARIABLE_VENDOR_DISAGREEMENT_UNEXPLAINED'
+
+
+          def inspect(sample, marcap_data, get_naver, throttle=0):
+              """No alteration of existing scanner files. get_naver is injectable for tests."""
+              findings = []
+              for i, (market, code, snapshot) in enumerate(sample, 1):
+                  report = {'code': code, 'name': str(snapshot.get('name', ''))[:100],
+                            'market': market, 'prior_snapshot_close': snapshot.get('price'),
+                            'naver_source': 'FinanceDataReader NAVER daily OHLCV (session unspecified)',
+                            'marcap_source': 'FinanceData/marcap KRX bulk daily dataset (vendor snapshot)',
+                            'session_provenance': 'UNVERIFIED_FOR_NAVER_DAILY',
+                            'samples': [], 'classification': 'UNTESTED', 'error': None}
+                  nav = {}
+                  for attempt in range(2):
+                      try:
+                          frame = get_naver(code)
+                          if frame is None or frame.empty:
+                              raise ValueError('empty NAVER daily bars')
+                          for stamp, row in frame.sort_index().iterrows():
+                              day = str(pd.Timestamp(stamp).date())
+                              if START <= day <= TARGET:
+                                  clean = clean_bar(row)
+                                  if clean:
+                                      nav[day] = clean
+                          report['error'] = None
+                          break
+                      except Exception as e:
+                          report['error'] = type(e).__name__ + ': ' + str(e)[:130]
+                          if attempt < 1:
+                              time.sleep(1)
+                  mc = marcap_data.get(code, {})
+                  shared = sorted(d for d in mc if START <= d <= PRIOR)
+                  recent = shared[-5:]
+                  report['samples'] = compare_days(mc, nav, recent)
+                  report['overlap_count'] = sum(e['status'] != 'missing' for e in report['samples'])
+                  report['prev_vendor_close_match'] = (mc[PRIOR]['Close'] == nav[PRIOR]['Close']) if PRIOR in mc and PRIOR in nav else None
+                  report['marcap_prior_close'] = mc.get(PRIOR, {}).get('Close')
+                  report['naver_prior_close'] = nav.get(PRIOR, {}).get('Close')
+                  report['snapshot_matches_marcap_prior'] = (float(snapshot.get('price')) == mc[PRIOR]['Close']) if PRIOR in mc and snapshot.get('price') is not None else None
+                  report['naver_target_close'] = nav.get(TARGET, {}).get('Close')
+                  report['marcap_target_close'] = mc.get(TARGET, {}).get('Close')
+                  report['target_cross_vendor_match'] = (mc[TARGET]['Close'] == nav[TARGET]['Close']) if TARGET in mc and TARGET in nav else None
+                  report['classification'] = 'NAVER_ERROR' if report['error'] else classify(report['samples'])
+                  findings.append(report)
+                  print(f"{i:02d}/40 {code} {market} overlapping={report['overlap_count']} "
+                        f"prior={report['prev_vendor_close_match']} "
+                        f"type={report['classification']}", flush=True)
+                  if throttle:
+                      time.sleep(throttle)
+              return findings
+
+
+          def summarize(findings, source):
+              def count(predicate):
+                  return sum(bool(predicate(r)) for r in findings)
+              prior_comparable = count(lambda r: r['prev_vendor_close_match'] is not None)
+              prior_same = count(lambda r: r['prev_vendor_close_match'] is True)
+              shared_target = count(lambda r: r['target_cross_vendor_match'] is not None)
+              return {
+                  'schema': 'jongbe-v884-five-day-vendor-diff-v1',
+                  'generated_at_kst': datetime.now(ZoneInfo('Asia/Seoul')).isoformat(timespec='seconds'),
+                  'previous_session': PRIOR, 'target_session': TARGET,
+                  'sample_count': len(findings),
+                  'marcap_latest_date': source.get('latest_date'),
+                  'naver_target_bars': count(lambda r: r['naver_target_close'] is not None),
+                  'prior_comparable': prior_comparable,
+                  'prior_close_equal': prior_same,
+                  'prior_close_different': prior_comparable - prior_same,
+                  'five_day_with_three_or_more_valid_pairs': count(lambda r: r['overlap_count'] >= 3),
+                  'all_five_ohlcv_identical': count(lambda r: r['classification'] == 'SAME_OHLCV_OVERLAP' and r['overlap_count'] == 5),
+                  'variable_disagreement': count(lambda r: r['classification'] == 'VARIABLE_VENDOR_DISAGREEMENT_UNEXPLAINED'),
+                  'possible_price_scale_unverified': count(lambda r: r['classification'] == 'PROPORTIONAL_PRICE_SCALE_CANDIDATE_UNVERIFIED'),
+                  'navigational_errors': count(lambda r: r['error'] is not None),
+                  'target_marcap_and_naver_comparable': shared_target,
+                  'target_close_equal': count(lambda r: r['target_cross_vendor_match'] is True),
+                  'full_market_data_switch_permitted': False,
+                  'interpretation': 'Differences cannot be attributed to KRX/NXT sessions, corporate actions, or one source being correct without exchange-level provenance.',
+                  'warning': 'Workflow success means diagnostics ran; does not establish feed accuracy or complete market coverage.',
+                  'source': source,
+                  'site_modified': False, 'trading_api_used': False,
+              }
+
+
+          def save(summary, findings):
+              OUTPUT.mkdir(parents=True, exist_ok=True)
+              (OUTPUT / 'report.json').write_text(json.dumps({'summary': summary, 'stocks': findings}, ensure_ascii=False, indent=2)+'\n', encoding='utf-8')
+              cols = ['code','name','market','prior_snapshot_close','marcap_prior_close','naver_prior_close',
+                      'prev_vendor_close_match','overlap_count','classification','naver_target_close','marcap_target_close','target_cross_vendor_match','error']
+              with (OUTPUT / 'report.csv').open('w', encoding='utf-8-sig', newline='') as output:
+                  writer = csv.DictWriter(output, fieldnames=cols, extrasaction='ignore')
+                  writer.writeheader()
+                  writer.writerows(findings)
+              txt = [
+                  'V8.8.4 5일치 데이터 공급원 차이 조사 (읽기 전용)',
+                  f'기준일 {PRIOR} → 검사일 {TARGET}',
+                  f'NAVER / Marcap 이전 거래일 비교: {summary["prior_close_equal"]}/{summary["prior_comparable"]}개 종가 일치',
+                  f'직전 5개 거래일에서 3개 이상 일치 날짜가 있는 종목: {summary["five_day_with_three_or_more_valid_pairs"]}/40',
+                  f'변동성 불일치: {summary["variable_disagreement"]}개 / 비례가격변환 의심(미검증): {summary["possible_price_scale_unverified"]}개',
+                  f'10월 30일 NAVER 자료 {summary["naver_target_bars"]}/40개, Marcap+NAVER 같은날 비교 가능 {summary["target_marcap_and_naver_comparable"]}/40개',
+                  f'Marcap 최신 원본 날짜: {summary["marcap_latest_date"]}',
+                  '주의: 일봉만으로 KRX 15:30 / NXT / KRX 시간외 여부를 판정하지 않음.',
+                  '서로 다른 값은 오류로 단정하지 않고 출처 불명으로 분류.',
+                  '기존 종목 검색기 또는 실거래 프로그램에 변경 사항 없음.',
+              ]
+              (OUTPUT / 'README-KO.txt').write_text('\n'.join(txt)+'\n', encoding='utf-8')
+
+
+          def main():
+              snapshot = json.loads(Path('results.json').read_text(encoding='utf-8'))
+              if snapshot.get('asof') != PRIOR or not isinstance(snapshot.get('rows'), list):
+                  raise RuntimeError('V8.8.4 test requires preserved 2026-10-29 previous snapshot; stop rather than guess')
+              selected = sample_40(snapshot['rows'])
+              session = requests.Session()
+              codes = {c for _, c, _ in selected}
+              mc, source = fetch_marcap(session, codes)
+              findings = inspect(selected, mc,
+                                 lambda c: fdr.DataReader('NAVER:' + c, START, END),
+                                 throttle=0.45)
+              summary = summarize(findings, source)
+              save(summary, findings)
+              print('DIFF_SUMMARY ' + json.dumps({k:v for k,v in summary.items() if k != 'source'}, ensure_ascii=False), flush=True)
+              # This checks availability, NOT equal prices or source/session provenance.
+              if summary['naver_target_bars'] < 36 or summary['five_day_with_three_or_more_valid_pairs'] < 36:
+                  raise SystemExit('DIAGNOSTIC INCOMPLETE: insufficient data coverage; see uploaded report')
+
+          if __name__ == '__main__':
+              main()
+          PYTHON
+          python /tmp/v884_vendor_diagnose.py
+      - name: Upload findings even if a vendor request fails
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: jongbe-v884-5day-vendor-report
+          path: v884-vendor-report/
+          if-no-files-found: warn
+          retention-days: 14
