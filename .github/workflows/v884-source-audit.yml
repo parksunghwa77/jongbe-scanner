@@ -1,0 +1,238 @@
+name: V8.8.4 close/source audit (read-only)
+
+on:
+  push:
+    branches: [v8.8.4-test]
+    paths:
+      - '.github/workflows/v884-source-audit.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 18
+    steps:
+      - name: Checkout isolated branch
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install read-only data dependency
+        run: python -m pip install 'finance-datareader==0.9.202' 'pandas>=2.2,<3'
+      - name: Audit session/source definitions on 40 samples
+        shell: bash
+        run: |
+          cat > /tmp/v884_source_audit.py <<'PYTHON'
+          """Safe, read-only V8.8.4 source/close provenance audit for 2026-10-30.
+
+          NAVER daily bars are NEVER assumed to be KRX 15:30 or NXT 20:00.
+          Regular-close reference quotes are documented third-party snapshots, NOT KRX feed.
+          The report separates valid OHLCV, cross-vendor discrepancies, and unknown session.
+          """
+          from __future__ import annotations
+
+          import csv
+          import json
+          import math
+          import time
+          from datetime import datetime
+          from pathlib import Path
+          from zoneinfo import ZoneInfo
+
+          import FinanceDataReader as fdr
+          import pandas as pd
+
+          KST = ZoneInfo("Asia/Seoul")
+          TARGET = "2026-10-30"
+          PREVIOUS = "2026-10-29"
+          REPORT_DIR = Path("v884-source-audit")
+
+          # Read-only dated references: third-party 15:30 quotes, not an authenticated KRX data feed.
+          # These are NOT labeled NXT, since closing market can't be deduced from NAVER daily data.
+          REGULAR_REFERENCES = {
+              "005930": {"close": 225000, "source": "GSIFN Samsung 2026-10-30 15:30", "url": "https://ir.gsifn.io/sample/stock_simple.html"},
+              "000660": {"close": 1418000, "source": "Hankyung SK hynix 2026-10-30 regular close", "url": "https://markets.hankyung.com/stock/000660/consensus"},
+          }
+
+
+          def selected_samples(snapshot_rows: list[dict], per_market: int = 20):
+              """Stable 20 KOSPI + 20 KOSDAQ sampling, including 005930/000660."""
+              selected = []
+              for market in ("KOSPI", "KOSDAQ"):
+                  pool = {
+                      str(r.get("code", "")): r
+                      for r in snapshot_rows
+                      if isinstance(r, dict) and r.get("market") == market
+                      and len(str(r.get("code", ""))) == 6 and str(r.get("code", "")).isdigit()
+                  }
+                  required = ("005930", "000660") if market == "KOSPI" else ()
+                  chosen = [c for c in required if c in pool]
+                  remaining = sorted(set(pool) - set(chosen))
+                  places = per_market - len(chosen)
+                  if places and remaining:
+                      indices = [int(i * (len(remaining) - 1) / max(places - 1, 1)) for i in range(places)]
+                      chosen.extend(remaining[i] for i in indices)
+                  if len(chosen) != per_market:
+                      raise ValueError(f"Expected {per_market} {market} symbols, got {len(chosen)}")
+                  selected.extend((market, code, pool[code]) for code in chosen)
+              return selected
+
+
+          def clean_bar(row):
+              fields = ["Open", "High", "Low", "Close", "Volume"]
+              try:
+                  values = [float(row[k]) for k in fields]
+              except (KeyError, ValueError, TypeError):
+                  return None
+              if not all(math.isfinite(n) for n in values):
+                  return None
+              o, h, l, c, v = values
+              if min(o, h, l, c) <= 0 or not (l <= o <= h and l <= c <= h and v >= 0):
+                  return None
+              return {name.lower(): int(value) for name, value in zip(fields, values)}
+
+
+          def audit(selected, fetch=None, throttle=.75):
+              """Read-only: no money flows or trade entry, no writes to existing scanner JSON."""
+              fetch = fetch or (lambda code: fdr.DataReader("NAVER:" + code, PREVIOUS, "2026-11-02"))
+              output = []
+              for number, (market, code, stock) in enumerate(selected, 1):
+                  r = {
+                      "market": market, "code": code, "name": str(stock.get("name", ""))[:100],
+                      "marcap_prior_date": PREVIOUS, "marcap_prior_close": stock.get("price"),
+                      "naver_source": "FinanceDataReader NAVER daily OHLCV",
+                      "naver_market_session": "UNVERIFIED (cannot infer NXT/KRX from daily bar)",
+                      "naver_2026_10_29_close": None, "naver_2026_10_30_close": None,
+                      "krx_regular_1530_close_reference": REGULAR_REFERENCES.get(code, {}).get("close"),
+                      "krx_reference_description": REGULAR_REFERENCES.get(code, {}).get("source"),
+                      "krx_reference_url": REGULAR_REFERENCES.get(code, {}).get("url"),
+                      "nxt_aftermarket_last_trade": None,
+                      "bar_valid": False,
+                      "prior_vendor_match": None,
+                      "regular_reference_match": None,
+                      "classification": "NOT_CHECKED",
+                      "error": None,
+                  }
+                  for attempt in range(2):
+                      try:
+                          df = fetch(code)
+                          if df is None or df.empty:
+                              raise ValueError("empty NAVER data")
+                          df = df.sort_index()
+                          by_date = {str(pd.Timestamp(stamp).date()): row for stamp, row in df.iterrows()}
+                          prior = clean_bar(by_date.get(PREVIOUS, {}))
+                          current = clean_bar(by_date.get(TARGET, {}))
+                          if prior is not None:
+                              r["naver_2026_10_29_close"] = prior["close"]
+                              if stock.get("price") is not None:
+                                  r["prior_vendor_match"] = float(stock["price"]) == prior["close"]
+                          if current is not None:
+                              r["naver_2026_10_30_close"] = current["close"]
+                              r["bar_valid"] = True
+                              regular = r["krx_regular_1530_close_reference"]
+                              if regular is not None:
+                                  r["regular_reference_match"] = current["close"] == regular
+                              if prior is None:
+                                  r["classification"] = "VALID_CURRENT_NO_PRIOR"
+                              elif r["prior_vendor_match"] is False:
+                                  r["classification"] = "VALID_CURRENT_PRIOR_SOURCE_DIFF"
+                              else:
+                                  r["classification"] = "VALID_CURRENT_PRIOR_MATCH"
+                          else:
+                              r["classification"] = "NO_VALID_TARGET_BAR"
+                          break
+                      except Exception as exc:
+                          r["error"] = type(exc).__name__ + ": " + str(exc)[:125]
+                          r["classification"] = "FETCH_FAILED"
+                          if attempt == 0:
+                              time.sleep(1)
+                  output.append(r)
+                  print(f"{number:02d}/{len(selected)} {code} {market} NAVER={r['naver_2026_10_30_close']} "
+                        f"valid={r['bar_valid']} prior_same={r['prior_vendor_match']} "
+                        f"source={r['classification']}", flush=True)
+                  if throttle:
+                      time.sleep(throttle)
+              return output
+
+
+          def summarize(rows):
+              valid = sum(row["bar_valid"] for row in rows)
+              compared = sum(row["prior_vendor_match"] is not None for row in rows)
+              matched = sum(row["prior_vendor_match"] is True for row in rows)
+              issues = sum(row["classification"] in ("NO_VALID_TARGET_BAR", "FETCH_FAILED") for row in rows)
+              # IMPORTANT: a valid NAVER bar does not establish the KRX regular close or NXT session.
+              # No automatic whole-market switch until a time-labeled and sourced provider is verified.
+              return {
+                  "schema": "jongbe-v884-source-audit-v1",
+                  "generated_at_kst": datetime.now(KST).isoformat(timespec="seconds"),
+                  "session_date": TARGET,
+                  "sample_size": len(rows),
+                  "naver_valid_target_bars": valid,
+                  "prior_vendor_comparable": compared,
+                  "prior_vendor_equal": matched,
+                  "prior_vendor_different": compared - matched,
+                  "fetch_or_bar_errors": issues,
+                  "krx_regular_reference_compared": sum(r["regular_reference_match"] is not None for r in rows),
+                  "krx_regular_reference_equal": sum(r["regular_reference_match"] is True for r in rows),
+                  "full_market_promotion_ready": False,
+                  "promotion_block_reason": (
+                      "NAVER daily has no independently verifiable KRX/NXT session label; "
+                      "10/29 NAVER vs Marcap historical differences need investigation. "
+                      "40/40 valid data does not prove identical price definitions."
+                  ),
+                  "explicit_absence": "No verified NXT last-trade quotes or official KRX per-stock 15:30 feed were fetched.",
+                  "site_and_trading_unchanged": True,
+              }
+
+
+          def write_report(summary, rows):
+              REPORT_DIR.mkdir(parents=True, exist_ok=True)
+              (REPORT_DIR / "audit.json").write_text(
+                  json.dumps({"summary": summary, "rows": rows}, ensure_ascii=False, indent=2) + "\n",
+                  encoding="utf-8",
+              )
+              with (REPORT_DIR / "audit.csv").open("w", encoding="utf-8-sig", newline="") as f:
+                  columns = list(rows[0]) if rows else ["code"]
+                  writer = csv.DictWriter(f, fieldnames=columns)
+                  writer.writeheader()
+                  writer.writerows(rows)
+              (REPORT_DIR / "읽어주세요.txt").write_text(
+                  "V8.8.4 가격 출처 비교 (거래/배포 없음)\n"
+                  "1. NAVER 일봉 종가는 종목별 실제 수집값이며, KRX 15:30 혹은 NXT 20:00이라고 자동 표시하지 않습니다.\n"
+                  "2. KRX 15:30 기준값은 삼성전자·SK하이닉스의 날짜가 명시된 외부 참고자료뿐입니다. 거래소 공식 API를 직접 조회한 값은 아닙니다.\n"
+                  "3. 2026-09-14 이후 KRX에도 20:00까지 애프터마켓이 있으므로 20:00 체결= NXT라고 판단하면 안 됩니다.\n"
+                  "4. 이전 데이터(마캡)와 금일 데이터(네이버) 간 기준 차이가 있는 상태로 데이터 자동 교체/전체시장 확장을 하지 않습니다.\n"
+                  "5. 전체 종목 확대는 정확한 가격 기준과 출처가 확인된 후 별도 제한 테스트에서 진행합니다.\n",
+                  encoding="utf-8",
+              )
+
+
+          def main():
+              snapshot = json.loads(Path("results.json").read_text(encoding="utf-8"))
+              if snapshot.get("asof") != PREVIOUS:
+                  raise RuntimeError("Only 2026-10-29 snapshot is supported for this dated audit")
+              selected = selected_samples(snapshot["rows"])
+              rows = audit(selected)
+              summary = summarize(rows)
+              write_report(summary, rows)
+              print("AUDIT_SUMMARY " + json.dumps(summary, ensure_ascii=False), flush=True)
+              if summary["naver_valid_target_bars"] < 36:
+                  raise SystemExit("Low coverage: 36/40 valid daily bars required")
+
+
+          if __name__ == "__main__":
+              main()
+          PYTHON
+          python /tmp/v884_source_audit.py
+      - name: Save report even if incomplete
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: jongbe-v884-source-audit
+          path: v884-source-audit/
+          if-no-files-found: warn
+          retention-days: 14
