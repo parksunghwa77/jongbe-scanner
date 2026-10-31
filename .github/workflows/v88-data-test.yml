@@ -1,0 +1,46 @@
+name: V88 Data Test
+
+on:
+  push:
+    branches: [v8.8.3-test]
+    paths:
+      - '.github/workflows/v88-data-test.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Collect stock data
+        run: python scanner.py
+
+      - name: Check results
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          d = json.loads(Path('results.json').read_text())
+          rows = d.get('rows', [])
+
+          assert rows, 'No stock data'
+          assert d.get('chart_count') == len(rows)
+          assert list(Path('charts').glob('*.json'))
+
+          print('DATA DATE:', d.get('asof'))
+          print('STOCK COUNT:', len(rows))
+          print('STATUS:', d.get('data_status'))
+          PY
