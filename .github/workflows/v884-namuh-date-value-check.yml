@@ -1,0 +1,135 @@
+name: V8.8.4 Namuh bsop_date value check (read-only)
+
+on:
+  push:
+    branches: [v8.8.4-test]
+    paths:
+      - '.github/workflows/v884-namuh-date-value-check.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check-date-values:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      NHPLUG_APP_KEY: ${{ secrets.NAMUH_APP_KEY }}
+      NHPLUG_APP_SECRET: ${{ secrets.NAMUH_APP_SECRET_KEY }}
+      NHPLUG_BASE_URL: https://api.nhplug.com:8443
+      NHPLUG_AUTH_URL: https://api.nhplug.com:8443
+      NHPLUG_RATE_LIMIT: '2'
+    steps:
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install NHPLUG SDK
+        run: python -m pip install --disable-pip-version-check 'nhplug==0.4.1'
+      - name: Inspect date field values (no raw API responses)
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json, os, re, time
+          from collections import Counter
+          from datetime import datetime
+          from pathlib import Path
+          from nhplug import call
+
+          if not os.getenv('NHPLUG_APP_KEY') or not os.getenv('NHPLUG_APP_SECRET'):
+              raise SystemExit('Secrets not configured. No credentials logged.')
+
+          target = '2026-10-30'
+          report = {'schema': 'jongbe-namuh-bsop-date-v1',
+                    'target_session': target,
+                    'read_only': True,
+                    'notes': ['This script examines only the public daily-bar date and close fields.',
+                              'A successful API response does not establish correct market/session close.'],
+                    'results': []}
+
+          def clean_date(value):
+              # Only permit date-like characters into a diagnostic report.
+              if value is None: return None
+              raw = str(value).strip()
+              if len(raw) > 40 or not re.fullmatch(r'[\d\s./:\-T+Z]+', raw):
+                  return None
+              return raw[:30]
+
+          def parse_date(text):
+              if not text: return None
+              digits = re.sub(r'\D', '', text)
+              # Accept both YYYYMMDD and YYYYMMDDHHMMSS date-time forms.
+              if len(digits) not in (8, 12, 14, 17): return None
+              try:
+                  return datetime.strptime(digits[:8], '%Y%m%d').date().isoformat()
+              except ValueError:
+                  return None
+
+          def safe_close(raw):
+              val = str(raw if raw is not None else '').strip().replace(',', '')
+              if not re.fullmatch(r'\d{1,10}', val): return None
+              price = int(val)
+              return price if 0 < price < 100000000 else None
+
+          for code in ('005930', '000660'):
+              for market, regular in (('KRX', 'Y'), ('KRX', 'N'), ('UNT', 'Y'), ('UNT', 'N')):
+                  item = {'code': code, 'market_cd': market, 'view_main_yn': regular,
+                          'row_count': 0, 'date_field_present_count': 0,
+                          'date_field_nonempty_count': 0, 'valid_date_count': 0,
+                          'date_types': {}, 'date_samples': [], 'target_close': None,
+                          'status': 'not_checked'}
+                  try:
+                      response = call('/krstock/quote/v1/currentDaily', {
+                          'market_cd': market, 'iem_cd': code,
+                          'array_cnt': '30', 'view_main_yn': regular,
+                      })
+                      rows = response.get('Output_0') if isinstance(response, dict) else None
+                      if isinstance(rows, dict): rows = [rows]
+                      if not isinstance(rows, list): rows = []
+                      item['row_count'] = len(rows)
+                      types = Counter()
+                      for row in rows:
+                          if not isinstance(row, dict): continue
+                          if 'bsop_date' not in row: continue
+                          item['date_field_present_count'] += 1
+                          raw = row['bsop_date']
+                          types[type(raw).__name__] += 1
+                          value = clean_date(raw)
+                          if value:
+                              item['date_field_nonempty_count'] += 1
+                          day = parse_date(value)
+                          if day:
+                              item['valid_date_count'] += 1
+                              if day == target:
+                                  item['target_close'] = safe_close(row.get('stck_clpr'))
+                          if len(item['date_samples']) < 5:
+                              item['date_samples'].append({'date_token': value, 'parsed_day': day,
+                                                           'close': safe_close(row.get('stck_clpr'))})
+                      item['date_types'] = dict(types)
+                      if item['valid_date_count']:
+                          item['status'] = 'date_parsing_ok'
+                      elif item['date_field_present_count'] == 0:
+                          item['status'] = 'date_key_missing'
+                      else:
+                          item['status'] = 'date_values_unusable'
+                  except Exception as exc:
+                      item['status'] = 'request_failed'
+                      item['error_type'] = type(exc).__name__
+                  report['results'].append(item)
+                  print(f'{code} {market}/{regular}: status={item["status"]} rows={item["row_count"]} '
+                        f'present={item["date_field_present_count"]} valid={item["valid_date_count"]} '
+                        f'samples={item["date_samples"]} target_close={item["target_close"]}', flush=True)
+                  time.sleep(.7)
+          Path('v884-namuh-date-value-report.json').write_text(
+              json.dumps(report, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
+          print('DATE VALUE CHECK COMPLETE: This is a diagnostic, not a feed switch.')
+          PY
+      - name: Save sanitized date-only report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: v884-namuh-date-value-report-${{ github.run_id }}
+          path: v884-namuh-date-value-report.json
+          if-no-files-found: warn
+          retention-days: 7
