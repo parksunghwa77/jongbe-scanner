@@ -1,0 +1,54 @@
+name: V88 Test Snapshot
+
+on:
+  push:
+    branches: [v8.8.3-test]
+    paths:
+      - '.github/workflows/v88-snapshot.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  snapshot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - run: pip install -r requirements.txt
+
+      - name: Generate stock data
+        run: |
+          python scanner.py
+          python upgrade_risk_ranking.py
+
+      - name: Verify data
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          d = json.loads(Path('results.json').read_text())
+          assert len(d['rows']) >= 2000
+          assert d['chart_count'] == len(d['rows'])
+          assert list(Path('charts').glob('*.json'))
+          assert d['lag_sessions'] <= 1
+          print('DATE:', d['asof'])
+          print('STOCKS:', len(d['rows']))
+          print('STATUS:', d['data_status'])
+          PY
+
+      - name: Save test data
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -f results.json charts/
+          if ! git diff --cached --quiet; then
+            git commit -m 'Add V88 test snapshot'
+            git push origin HEAD:refs/heads/v8.8.3-test
+          fi
