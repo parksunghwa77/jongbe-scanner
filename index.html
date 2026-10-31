@@ -4,6 +4,16 @@
   <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="theme-color" content="#f4f8ff">
   <title>종베 스캐너 v8.7 · 자동 시세 관찰 · 패턴별 조건 검증</title>
+  <link rel="stylesheet" href="./v88/v88-style.css">
+<script type="module">
+  const panel = document.createElement("section");
+  panel.id = "v88Root";
+  document.querySelector("main").prepend(panel);
+
+  await import("./v88/v88-engine.js");
+  await import("./v88/v88-forecast.js");
+  await import("./v88/v88-panel.js");
+</script>
   <style>
     :root{color-scheme:light}*{box-sizing:border-box}
     body{margin:0;background:#101827;color:#f3f6fe;font-family:system-ui,-apple-system,"Noto Sans KR",sans-serif}
