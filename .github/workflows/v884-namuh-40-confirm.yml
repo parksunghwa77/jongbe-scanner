@@ -1,0 +1,155 @@
+name: V8.8.4 Namuh 40-stock KRX session confirmation (read-only)
+
+on:
+  push:
+    branches: [v8.8.4-test]
+    paths:
+      - '.github/workflows/v884-namuh-40-confirm.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  confirm:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      NHPLUG_APP_KEY: ${{ secrets.NAMUH_APP_KEY }}
+      NHPLUG_APP_SECRET: ${{ secrets.NAMUH_APP_SECRET_KEY }}
+      NHPLUG_BASE_URL: https://api.nhplug.com:8443
+      NHPLUG_AUTH_URL: https://api.nhplug.com:8443
+      NHPLUG_RATE_LIMIT: '2'
+    steps:
+      - name: Checkout test branch
+        uses: actions/checkout@v4
+      - name: Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install NH official SDK
+        run: python -m pip install --disable-pip-version-check nhplug==0.4.1
+      - name: Verify KRX regular and full-session closes from Namuh
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json, os, re, time
+          from collections import Counter
+          from datetime import datetime
+          from pathlib import Path
+          from zoneinfo import ZoneInfo
+          from nhplug import call
+
+          # DO NOT place orders, access balances, log raw responses or publish keys.
+          TARGET='2026-10-30'
+          SRC=Path('results.json')
+          OUTPUT=Path('v884-namuh-40-confirm')
+          OUTPUT.mkdir(exist_ok=True)
+          REFS={
+            '005930': {'KRX/Y': 225000, 'KRX/N': 220500},
+            '000660': {'KRX/Y': 1418000, 'KRX/N': 1391000},
+          }
+          if not os.getenv('NHPLUG_APP_KEY') or not os.getenv('NHPLUG_APP_SECRET'):
+              raise SystemExit('NHPLUG credentials missing from GitHub Secrets; nothing was queried.')
+
+          def dayparse(raw):
+              s=str(raw or '').strip()
+              for fmt in ('%y/%m/%d','%Y-%m-%d','%Y%m%d','%y%m%d','%Y/%m/%d'):
+                  try:
+                      val=datetime.strptime(s,fmt).date()
+                      if 2020<=val.year<=2030:return val.isoformat()
+                  except ValueError:pass
+              return None
+
+          def positive_number(x, allow_zero=False):
+              s=str(x if x is not None else '').replace(',','').strip()
+              if not re.fullmatch(r'\d{1,14}',s):return None
+              n=int(s)
+              return n if (n>=0 if allow_zero else n>0) else None
+
+          def sample40():
+              if not SRC.exists():raise RuntimeError('results.json not found on branch')
+              obj=json.loads(SRC.read_text(encoding='utf-8'))
+              if obj.get('asof')!='2026-10-29':
+                  raise RuntimeError('The test requires previous-day 2026-10-29 snapshot; refusing an unknown vintage')
+              pools={'KOSPI':[], 'KOSDAQ':[]}
+              for r in obj.get('rows',[]):
+                  m=r.get('market');c=str(r.get('code',''))
+                  if m in pools and re.fullmatch(r'\d{6}',c):pools[m].append((c,str(r.get('name',''))[:80]))
+              for market in pools:pools[market]=sorted(set(pools[market]))
+              choices=[]
+              for market in ('KOSPI','KOSDAQ'):
+                  pool=pools[market]
+                  if len(pool)<20:raise RuntimeError('Too few eligible stocks: '+market)
+                  chosen=[]
+                  if market=='KOSPI':
+                      for code in ('005930','000660'):
+                          match=next(((c,n) for c,n in pool if c==code),None)
+                          if match is None:raise RuntimeError('Required stock missing: '+code)
+                          chosen.append(match)
+                  rest=[x for x in pool if x[0] not in {y[0] for y in chosen}]
+                  need=20-len(chosen)
+                  chosen.extend(rest[(i*(len(rest)-1))//max(1,need-1)] for i in range(need))
+                  if len({c for c,_ in chosen})!=20:raise RuntimeError('Duplicate sample: '+market)
+                  choices.extend((market,c,n) for c,n in chosen)
+              return choices
+
+          stocks=sample40()
+          report={'schema':'jongbe-v884-namuh-40-close-v1','target_session':TARGET,
+                  'generated_at_kst':datetime.now(ZoneInfo('Asia/Seoul')).isoformat(timespec='seconds'),
+                  'modes':{'KRX/Y':'KRX 정규장','KRX/N':'KRX 정규장+정규장외'},
+                  'sample_size':len(stocks),'rows':[],
+                  'note':'Read-only daily quotes. A date parser handles YY/MM/DD. No account/orders/secrets.'}
+          for i,(market,code,name) in enumerate(stocks,1):
+              record={'code':code,'name':name,'market':market,'modes':{}}
+              for regular in ('Y','N'):
+                  label='KRX/'+regular
+                  status={'status':'missing','close':None,'date_found':False,'date_format':'YY/MM/DD or supported','row_count':0}
+                  try:
+                      response=call('/krstock/quote/v1/currentDaily',{
+                          'market_cd':'KRX','iem_cd':code,'array_cnt':'15','view_main_yn':regular})
+                      rows=response.get('Output_0') if isinstance(response,dict) else None
+                      if isinstance(rows,dict):rows=[rows]
+                      if not isinstance(rows,list):rows=[]
+                      status['row_count']=len(rows)
+                      match=next((r for r in rows if isinstance(r,dict) and dayparse(r.get('bsop_date'))==TARGET),None)
+                      if match is not None:
+                          status['date_found']=True
+                          close=positive_number(match.get('stck_clpr'))
+                          if close is not None:
+                              status.update({'status':'ok','close':close})
+                          else:status['status']='invalid_close'
+                  except Exception as exc:
+                      status.update({'status':'api_failure','error_class':type(exc).__name__})
+                  record['modes'][label]=status
+                  time.sleep(0.65)
+              report['rows'].append(record)
+              a=record['modes']['KRX/Y'];b=record['modes']['KRX/N']
+              print(f'{i:02d}/40 {code} {market} KRX regular={a["close"]} ({a["status"]}) '
+                    f'KRX all-session={b["close"]} ({b["status"]})',flush=True)
+
+          good_reg=sum(r['modes']['KRX/Y']['status']=='ok' for r in report['rows'])
+          good_all=sum(r['modes']['KRX/N']['status']=='ok' for r in report['rows'])
+          matches=[]
+          for code,expected in REFS.items():
+              item=next(r for r in report['rows'] if r['code']==code)
+              for mode,val in expected.items():
+                  matches.append({'code':code,'mode':mode,'expected':val,'actual':item['modes'][mode]['close'],
+                                  'equal':item['modes'][mode]['close']==val})
+          report['summary']={'valid_krx_regular':good_reg,'valid_krx_full':good_all,
+                             'reference_comparisons':matches,
+                             'ready_for_larger_test':good_reg>=36 and good_all>=36 and all(m['equal'] for m in matches)}
+          (OUTPUT/'result.json').write_text(json.dumps(report,ensure_ascii=False,indent=2)+'\n',encoding='utf-8')
+          print('SUMMARY '+json.dumps(report['summary'],ensure_ascii=False),flush=True)
+          if not report['summary']['ready_for_larger_test']:
+              raise SystemExit('CHECK INCOMPLETE: fewer than 36/40 valid quotes or major reference mismatch')
+          print('PASS: 40-stock NH KRX regular/full-session read-only comparison complete.')
+          PY
+      - name: Keep public-only report for seven days
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: v884-namuh-40-confirm-${{ github.run_id }}
+          path: v884-namuh-40-confirm/result.json
+          retention-days: 7
+          if-no-files-found: warn
