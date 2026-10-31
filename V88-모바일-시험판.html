@@ -1,0 +1,400 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#f2f7fd"><title>종베 스캐너 V8.8 · 별도 미리보기</title>
+<style>
+:root{
+  font-family:system-ui,-apple-system,"Noto Sans KR",sans-serif;
+  color-scheme:light;
+  --page:#f2f7fd;--ink:#162941;--muted:#50657f;--border:#d7e4f2;--panel:#ffffff;
+  --button:#206bd8;--button-border:#1e61bd;--button-text:#ffffff;
+  --sub-button:#ebf3ff;--sub-text:#20529b;--sub-border:#bcd3ef;
+  --notice:#fff9eb;--notice-border:#e7c580;--notice-text:#694411;
+  --stat:#eaf3ff;--tag:#edf4fd;--tag-text:#365878;--details:#20569d;
+  --pill:#e7effa;--pill-text:#3c546f;--positive:#def5e9;--positive-text:#146345;
+  --negative:#ffe5e5;--negative-text:#a32733;--chart-bg:#ffffff;
+  --chart-upper:#ae722b;--chart-middle:#315e9d;--chart-lower:#2699c6;
+  --candle-up:#df4e53;--candle-down:#246cc8;--error:#a32733;
+  background:var(--page);color:var(--ink)
+}
+:root[data-theme="dark"]{
+  color-scheme:dark;
+  --page:#0d172a;--ink:#f1f5fc;--muted:#bdcee5;--border:#344863;--panel:#17253d;
+  --button:#2d64b5;--button-border:#4788df;--button-text:#fff;
+  --sub-button:#293a54;--sub-text:#e6f0ff;--sub-border:#52668b;
+  --notice:#292336;--notice-border:#a98037;--notice-text:#ffe5a3;
+  --stat:#243451;--tag:#273c59;--tag-text:#d7e4f6;--details:#b8ddff;
+  --pill:#2d415a;--pill-text:#dde5f1;--positive:#173d35;--positive-text:#8cf1b8;
+  --negative:#54282f;--negative-text:#ffb3ad;--chart-bg:#101e33;
+  --chart-upper:#eeb05d;--chart-middle:#bed7f3;--chart-lower:#73c4ef;
+  --candle-up:#ec6969;--candle-down:#4c9bff;--error:#ffb3ad
+}
+*{box-sizing:border-box}body{margin:0;background:var(--page)}
+main{max-width:1060px;margin:auto;padding:22px 16px 64px}
+h1{font-size:clamp(24px,4vw,32px);margin:9px 0 10px;letter-spacing:-.6px}
+h2{font-size:18px;color:var(--ink);margin:6px 0 16px}
+p{line-height:1.7;color:var(--muted)}
+header{padding:8px 0 22px}.topline{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
+.mini{font-size:12px;color:var(--muted);font-weight:600}
+.notice{background:var(--notice);border:1px solid var(--notice-border);color:var(--notice-text);padding:14px 16px;border-radius:12px;font-size:13px;line-height:1.7}
+.panel{border:1px solid var(--border);background:var(--panel);border-radius:16px;padding:20px;margin:14px 0;box-shadow:0 4px 16px rgba(20,61,107,.06)}
+.controls{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px}
+label{display:flex;flex-direction:column;gap:7px;color:var(--muted);font-weight:700;font-size:13px}
+select,input,button{font:inherit;border:1px solid var(--border);border-radius:10px;padding:12px;min-width:0}
+select,input{background:var(--panel);color:var(--ink);width:100%;border-color:#b6c9df}
+input{border:1px solid var(--border);border-radius:10px;padding:12px;font:inherit}
+:root[data-theme="dark"] select,:root[data-theme="dark"] input{background:#253753;border-color:#52668b}
+button{cursor:pointer;background:var(--button);border-color:var(--button-border);font-weight:800;color:var(--button-text)}
+button:disabled{opacity:.55;cursor:not-allowed}
+button.secondary,button.theme-toggle{background:var(--sub-button);color:var(--sub-text);border-color:var(--sub-border)}
+button.theme-toggle{font-size:13px;padding:9px 13px;white-space:nowrap}
+button:focus-visible,select:focus-visible,input:focus-visible,summary:focus-visible{outline:3px solid #4d9bed;outline-offset:2px}
+.row{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-top:16px}
+#status{font-weight:650;font-size:13px;color:var(--muted);line-height:1.6}
+.stats{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}
+.stat{background:var(--stat);border:1px solid var(--border);border-radius:10px;padding:9px 12px;font-size:12px;color:var(--ink)}.stat b{font-size:16px}
+.card{background:var(--panel);border:1px solid var(--border);border-radius:14px;margin:11px 0;padding:16px;box-shadow:0 2px 12px rgba(20,61,107,.04)}
+.cardtop{display:flex;gap:8px;justify-content:space-between;align-items:flex-start;flex-wrap:wrap}.title{font-weight:850;font-size:16px}.sub{font-size:12px;color:var(--muted);margin-top:5px;line-height:1.6}
+.pill{border-radius:99px;padding:6px 10px;white-space:nowrap;font-size:12px;font-weight:800;background:var(--pill);color:var(--pill-text)}
+.pill.signal{background:var(--positive);color:var(--positive-text)}.pill.danger{background:var(--negative);color:var(--negative-text)}
+.tags{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}.tag{border-radius:6px;background:var(--tag);color:var(--tag-text);font-size:11px;padding:6px}
+.detail{border-top:1px solid var(--border);margin-top:12px;padding-top:8px;color:var(--muted);font-size:12px;line-height:1.8}
+details summary{cursor:pointer;font-weight:800;color:var(--details);padding:8px 0}
+svg{display:block;width:100%;height:auto;background:var(--chart-bg);border:1px solid var(--border);border-radius:10px;margin:10px 0}
+.legend{font-size:11px;color:var(--muted);margin:5px 0}.legend span{margin-right:10px}
+#error{color:var(--error);white-space:pre-wrap;line-height:1.6}.hidden{display:none!important}
+.assumption{font-size:12px;line-height:1.7;color:var(--muted)}
+.scenario-result{background:var(--stat);border:1px solid var(--border);padding:14px;border-radius:12px;margin-top:15px;line-height:1.8}
+.scenario-result strong{font-size:19px;color:var(--ink)}
+.scenario-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+.scenario-weights{font-size:12px;color:var(--muted);margin-top:9px;line-height:1.7}
+footer{margin-top:22px;font-size:12px;color:var(--muted);line-height:1.8}
+@media(max-width:760px){.controls{grid-template-columns:repeat(2,minmax(0,1fr))}.panel{padding:16px}.row>button:not(.theme-toggle){flex:1}}
+@media(max-width:560px){.scenario-grid{grid-template-columns:1fr 1fr}}
+@media(max-width:430px){.controls{grid-template-columns:1fr 1fr;gap:10px}.card{padding:13px}.panel{padding:14px}main{padding:18px 14px 60px}}
+</style>
+</head>
+<body><main>
+<header>
+<div class="topline"><div class="mini">V8.8 모바일 시험판 · 기존 V8.7 GitHub 코드 변경 없음</div><button type="button" id="themeToggle" class="theme-toggle" aria-label="어두운 테마로 전환" aria-pressed="false">🌙 어둡게</button></div>
+<h1>📈 종베 스캐너 V8.8 · 밝은 화면</h1>
+<p>볼린저밴드 3선 · 적삼병/흑삼병 · 일목균형표 돌파/실패 · 시총·거래대금 필터 · 관찰/위험 분류 · 익일 시초가 가정 계산</p>
+<div class="notice">⚠️ 이 화면은 <b>확정 일봉</b> 데이터 기반 규칙 관찰용입니다. 실시간 시세, 매수 추천, 성공 확률, 자동주문을 제공하지 않습니다. 시세 기준일과 지연 여부를 확인하세요. '중대형 시총'은 편의상 시가총액 필터이며 <b>법정 중견기업 분류가 아닙니다.</b></div>
+</header>
+<div class="panel" style="border:2px solid #bcd4ef"><strong>🧪 통합 업그레이드 안내</strong><p>이 시험판은 모바일 화면 확인용이며 수동 시나리오만 계산합니다. 최신 4개 시장지표 자동 연동·시점 검증·예측모델은 <b>별도 설치 패키지의 V8.8 확장</b>에서 동작하며, 아직 GitHub 메인 사이트에는 배포되지 않았습니다. 설치 전에는 실시간 수치와 다음날 예상액을 실제 분석 결과라고 표시하지 않습니다.</p></div>
+<section class="panel" aria-labelledby="filtersTitle"><h2 id="filtersTitle">자동검색 조건</h2>
+<div class="controls">
+<label>패턴<select id="signal">
+<option value="all">전체 패턴</option><option value="bb_reentry">볼린저 하단 이탈 후 재진입</option>
+<option value="bb_squeeze_breakout">볼린저 스퀴즈 후 상단 돌파</option>
+<option value="bb_breakout_volume">볼린저 상단 돌파 + 거래량 1.5배</option>
+<option value="red_soldiers">적삼병</option><option value="black_soldiers">흑삼병</option>
+<option value="cloud_breakout">구름대 상향 돌파</option><option value="cloud_failed">구름대 돌파 실패</option>
+</select></label>
+<label>기업 규모 (시총 기준)<select id="size">
+<option value="large">시총 5,000억 이상</option><option value="all">전체 종목</option><option value="unknown">시총 미확인만</option>
+</select></label>
+<label>최소 거래대금<select id="turnover">
+<option value="0">제한 없음</option><option value="100">100억원 이상</option><option value="500" selected>500억원 이상</option><option value="1000">1,000억원 이상</option>
+</select></label>
+<label>시장<select id="market"><option value="ALL">코스피 + 코스닥</option><option value="KOSPI">코스피</option><option value="KOSDAQ">코스닥</option></select></label>
+<label>캔들 패턴 엄격도<select id="strict"><option value="0.4">기본: 몸통 40% 이상</option><option value="0.6">엄격: 몸통 60% 이상</option></select></label>
+<label>결과 정렬<select id="order"><option value="score">위험조정 점수순</option><option value="money">거래대금순</option><option value="date">종목명순</option></select></label>
+</div>
+<div class="row"><button id="search">🔎 자동검색 시작</button><button id="cancel" class="secondary" disabled>중단</button><button id="export" class="secondary" disabled>CSV 저장</button></div>
+<div class="row"><span id="status" role="status">아직 검색하지 않았습니다.</span></div><div id="error"></div>
+</section>
+<section class="panel" id="scenarioPanel" aria-labelledby="scenarioTitle">
+<h2 id="scenarioTitle">📊 익일 개별주 시초가 시나리오 · 시험용</h2>
+<div class="notice">⚠️ <b>이 계산은 예측 모델이 아닌 가정값 비교 기능</b>입니다. 아래 시장 수치와 계수는 자동 수집·통계 추정된 값이 아닙니다. 현재가나 미래 가격을 보증하지 않으며 실제 매매 근거로 사용하지 마세요.</div>
+<p class="assumption">한국 장 마감 후의 야간 변동 정보를 동일한 시간 기준으로 입력하세요. 나스닥은 <b>나스닥100 선물(NQ)</b>, 한국 야선은 <b>코스피200 선물</b>입니다. 미국채 10년물은 금리 수준(%)이 아니라 <b>전 관찰 시점 대비 변화(bp)</b>입니다. 수치가 없으면 0 대신 빈칸으로 남겨 두세요.</p>
+<div class="scenario-grid">
+<label>종목명<input id="scenarioName" placeholder="예: 삼성전자" maxlength="60" autocomplete="off"></label>
+<label>국내 주식 최근 확정 종가 (원)<input id="scenarioClose" type="number" min="1" step="1" placeholder="확정 종가 직접 입력"></label>
+<label>나스닥100 선물 변동률 (%)<input id="scenarioNQ" type="number" min="-30" max="30" step="0.01" placeholder="예: 0.75"></label>
+<label>코스피200 야간선물 변동률 (%)<input id="scenarioKOSPI" type="number" min="-30" max="30" step="0.01" placeholder="예: -0.40"></label>
+<label>미국채 10년물 금리 변화 (bp)<input id="scenarioUST" type="number" min="-150" max="150" step="0.1" placeholder="예: +5 (5bp 상승)"></label>
+<label>필라델피아 반도체(SOX) 변동률 (%)<input id="scenarioSOX" type="number" min="-30" max="30" step="0.01" placeholder="예: +1.25"></label>
+<label>종목 유형 (가정 가중치)<select id="scenarioCategory"><option value="general">일반주 · 예시 가중치</option><option value="semis">반도체주 · 예시 가중치</option><option value="growth">기술·성장주 · 예시 가중치</option></select></label>
+</div>
+<div class="scenario-weights" id="scenarioWeights"></div>
+<div class="row"><button id="scenarioCalculate" type="button">🧮 예시 가격 계산</button><button type="button" id="scenarioReset" class="secondary">수치 초기화</button></div>
+<div id="scenarioResult" class="scenario-result hidden" role="status" aria-live="polite"></div>
+<p class="assumption">계산 방식: 최근 확정 종가 × (1 + 예시 변동률/100). 예시 변동률은 시장요인 변화를 <b>임의 가중합</b>한 값이며 과거 학습·상관관계 검증·확률 계산이 아닙니다. SOX와 나스닥 선물은 움직임이 겹쳐 실제 회귀 모델에서 중복 반영 방지가 필요합니다. 향후 실제 예측을 위해서는 종목별 이력, 야간 지표 이력, 발표시각 일치 및 시간순 백테스트가 필수입니다.</p>
+</section>
+<div id="stats" class="stats"></div><div id="results" aria-live="polite"></div>
+<button id="more" class="secondary hidden">결과 20개 더 보기</button>
+<footer>보안: NH API 키·비밀키·계좌·주문 기능 없음. 기존 GitHub Pages가 게시한 공개 확정 일봉 파일만 읽습니다. 거래정지·상폐·결측 자료의 정확성은 원본 품질에 의존합니다. 데이터 지연 또는 차트 일부 로드 실패 시 검색 결과는 불완전할 수 있습니다.</footer>
+</main>
+<script>/* 종베 스캐너 v8.8 관찰 신호 분석 엔진 (확정 일봉 전용).
+ * 이 스크립트는 조회/분석만 하며 매수·매도 주문을 수행하지 않는다.
+ */
+(function (root, factory) {
+  const api = factory();
+  if (typeof module === 'object' && module.exports) module.exports = api;
+  else root.JongbeV88 = api;
+})(typeof globalThis !== 'undefined' ? globalThis : this, function () {
+  'use strict';
+  const N = x => x === null || x === undefined || x === '' ? NaN : Number(x);
+  const finite = Number.isFinite;
+  const rolling = (values, length) => {
+    const result = Array(values.length).fill(null);
+    for (let i = length - 1; i < values.length; i++) {
+      const slice = values.slice(i - length + 1, i + 1);
+      if (slice.every(finite)) result[i] = slice.reduce((a, b) => a + b, 0) / length;
+    }
+    return result;
+  };
+  function bollinger(closes, period = 20, multiplier = 2) {
+    const middle = rolling(closes, period);
+    const upper = [], lower = [], width = [];
+    for (let i = 0; i < closes.length; i++) {
+      if (middle[i] === null || middle[i] <= 0) { upper.push(null); lower.push(null); width.push(null); continue; }
+      const values = closes.slice(i - period + 1, i + 1);
+      const variance = values.reduce((a, v) => a + (v - middle[i]) ** 2, 0) / period;
+      const deviation = Math.sqrt(variance);
+      upper.push(middle[i] + multiplier * deviation);
+      lower.push(middle[i] - multiplier * deviation);
+      width.push(deviation * multiplier * 2 / middle[i]);
+    }
+    return { upper, middle, lower, width };
+  }
+  const midpoint = (b, e, i) => {
+    if (i < b - 1) return null;
+    const arr = e.slice(i - b + 1, i + 1);
+    if (arr.length !== b || !arr.every(x => finite(x.high) && finite(x.low))) return null;
+    return (Math.max(...arr.map(x => x.high)) + Math.min(...arr.map(x => x.low))) / 2;
+  };
+  function cloud(bars) {
+    // 오늘 실제 구름대는 26거래일 전에 계산한 선행스팬을 26일 우측 이동한 값이다.
+    const ceiling = Array(bars.length).fill(null), floor = Array(bars.length).fill(null);
+    for (let i = 0; i < bars.length; i++) {
+      const shifted = i - 26;
+      if (shifted < 0) continue;
+      const tenkan = midpoint(9, bars, shifted);
+      const kijun = midpoint(26, bars, shifted);
+      const spanB = midpoint(52, bars, shifted);
+      if ([tenkan, kijun, spanB].every(finite)) {
+        const spanA = (tenkan + kijun) / 2;
+        ceiling[i] = Math.max(spanA, spanB);
+        floor[i] = Math.min(spanA, spanB);
+      }
+    }
+    return { ceiling, floor };
+  }
+  function soldier(bars, direction, strictness = 0.40) {
+    const group = bars.slice(-3);
+    if (group.length !== 3) return false;
+    for (let i = 0; i < 3; i++) {
+      const b = group[i];
+      if (b.high <= b.low) return false;
+      const body = Math.abs(b.close - b.open) / (b.high - b.low);
+      if (body < strictness) return false;
+      if (direction === 'red' && b.close <= b.open) return false;
+      if (direction === 'black' && b.close >= b.open) return false;
+      if (i > 0) {
+        if (direction === 'red' && (b.close <= group[i - 1].close || b.open < group[i - 1].open)) return false;
+        if (direction === 'black' && (b.close >= group[i - 1].close || b.open > group[i - 1].open)) return false;
+      }
+    }
+    return true;
+  }
+  function parseBars(records) {
+    if (!Array.isArray(records)) return [];
+    return records.map(row => ({
+      date: String(row?.[0] ?? ''), open: N(row?.[1]), high: N(row?.[2]),
+      low: N(row?.[3]), close: N(row?.[4]), volume: N(row?.[5])
+    })).filter(b => /^\d{4}-\d{2}-\d{2}$/.test(b.date) &&
+      [b.open, b.high, b.low, b.close, b.volume].every(finite) &&
+      b.open > 0 && b.close > 0 && b.high >= Math.max(b.low, b.open, b.close) &&
+      b.low <= Math.min(b.open, b.close) && b.low > 0 && b.volume >= 0)
+      .sort((a, b) => a.date.localeCompare(b.date));
+  }
+  function analyze(records, opts = {}) {
+    const bars = parseBars(records), n = bars.length, signals = [];
+    const result = { ready: false, bars, signals, bb: null, cloud: null, avgVolume: null,
+      latest: bars.at(-1) || null, reason: '', risk: 'watch' };
+    if (n < 80) { result.reason = '80거래일 미만으로 볼린저·일목 계산에 필요한 자료가 부족합니다.'; return result; }
+    const closes = bars.map(x => x.close);
+    const bb = bollinger(closes), c = cloud(bars), t = n - 1, p = t - 1;
+    result.ready = true; result.bb = bb; result.cloud = c;
+    const volumes = bars.slice(-21, -1).map(x => x.volume); // 오늘 제외 20일 평균
+    const avg = volumes.length === 20 ? volumes.reduce((a, b) => a + b, 0) / 20 : null;
+    result.avgVolume = avg;
+    result.volumeRatio = avg > 0 ? bars[t].volume / avg : null;
+    const bbNowValid = [bb.upper[t], bb.lower[t], bb.upper[p], bb.lower[p]].every(finite);
+    const crossedUp = bbNowValid && closes[t] > bb.upper[t] && closes[p] <= bb.upper[p];
+    if (bbNowValid && closes[p] < bb.lower[p] && closes[t] >= bb.lower[t]) signals.push('bb_reentry');
+    if (crossedUp && result.volumeRatio !== null && result.volumeRatio >= 1.5) signals.push('bb_breakout_volume');
+    // 직전까지 밴드폭이 최근 40일 폭의 하위 20%인 경우만 보수적으로 수축으로 간주.
+    const previousWidths = bb.width.slice(Math.max(0, p - 39), p + 1).filter(finite).sort((a, b) => a - b);
+    const squeeze = previousWidths.length >= 35 && bb.width[p] !== null &&
+      bb.width[p] <= previousWidths[Math.floor((previousWidths.length - 1) * 0.2)];
+    if (crossedUp && squeeze) signals.push('bb_squeeze_breakout');
+    if (soldier(bars, 'red', Number(opts.strictness ?? 0.40))) signals.push('red_soldiers');
+    if (soldier(bars, 'black', Number(opts.strictness ?? 0.40))) signals.push('black_soldiers');
+    if (finite(c.ceiling[t]) && finite(c.ceiling[p])) {
+      if (closes[p] <= c.ceiling[p] && closes[t] > c.ceiling[t]) signals.push('cloud_breakout');
+      // 최근 10일 안에 처음 구름대 상향 돌파하고 이후 다시 구름대 하단으로 내려온 종목.
+      if (finite(c.floor[t]) && closes[t] < c.floor[t]) {
+        for (let j = Math.max(1, t - 10); j < t; j++) {
+          if (finite(c.ceiling[j]) && finite(c.ceiling[j - 1]) &&
+            closes[j - 1] <= c.ceiling[j - 1] && closes[j] > c.ceiling[j]) {
+            signals.push('cloud_failed'); break;
+          }
+        }
+      }
+    }
+    if (signals.includes('black_soldiers') || signals.includes('cloud_failed')) result.risk = 'danger';
+    else if (signals.length) result.risk = 'signal';
+    result.reason = signals.length ? '확정 일봉 기반 조건 발견' : '설정한 기술적 조건이 발생하지 않음';
+    return result;
+  }
+  return { parseBars, rolling, bollinger, cloud, soldier, analyze };
+});
+</script>
+<script>
+(() => {
+'use strict';
+const $=id=>document.getElementById(id);
+// 파일 뷰어(content://)에서 저장소 접근이 차단되어도 화면 전환은 작동하도록 예외 처리.
+const THEME_KEY='jongbe-v88-theme';
+let chosenTheme='light';
+try{const saved=localStorage.getItem(THEME_KEY);if(saved==='dark'||saved==='light')chosenTheme=saved}catch(_){/* 파일 뷰어 */}
+function paintTheme(theme){
+ chosenTheme=theme==='dark'?'dark':'light';
+ document.documentElement.setAttribute('data-theme',chosenTheme);
+ const btn=$('themeToggle');btn.textContent=chosenTheme==='light'?'🌙 어둡게':'☀️ 밝게';
+ btn.setAttribute('aria-label',chosenTheme==='light'?'어두운 테마로 전환':'밝은 테마로 전환');
+ btn.setAttribute('aria-pressed',String(chosenTheme==='dark'));
+ document.querySelector('meta[name="theme-color"]').setAttribute('content',chosenTheme==='light'?'#f2f7fd':'#0d172a');
+}
+paintTheme(chosenTheme);
+$('themeToggle').addEventListener('click',()=>{paintTheme(chosenTheme==='light'?'dark':'light');try{localStorage.setItem(THEME_KEY,chosenTheme)}catch(_){}});
+// v8.8 개별주 익일 시초가 가정 시나리오 (실제 시세 추정 모델 아님)
+// 아래 가중치는 오직 화면 동작 확인용 임의 예시이며 과거 통계로 학습되지 않았음.
+const scenarioWeights={
+ general:{nq:0.20,kospi:0.55,sox:0.25,rate:-0.012},
+ semis:{nq:0.20,kospi:0.25,sox:0.55,rate:-0.012},
+ growth:{nq:0.45,kospi:0.35,sox:0.20,rate:-0.020}
+};
+function showScenarioWeights(){
+ const w=scenarioWeights[$('scenarioCategory').value];
+ $('scenarioWeights').textContent=`시험용 가중치 (과거 학습값 아님): 나스닥100 × ${w.nq} + 코스피200 야선 × ${w.kospi} + SOX × ${w.sox} + 미국채 10년물 변동(bp) × ${w.rate}. 단위는 최종 주가 변화율 %p입니다.`;
+ $('scenarioResult').classList.add('hidden');
+}
+$('scenarioCategory').addEventListener('change',showScenarioWeights);
+showScenarioWeights();
+$('scenarioReset').addEventListener('click',()=>{
+ for(const id of ['scenarioName','scenarioClose','scenarioNQ','scenarioKOSPI','scenarioUST','scenarioSOX'])$(id).value='';
+ $('scenarioCategory').value='general';showScenarioWeights();
+});
+$('scenarioCalculate').addEventListener('click',()=>{
+ const out=$('scenarioResult');out.classList.remove('hidden');out.replaceChildren();
+ const ids=['scenarioClose','scenarioNQ','scenarioKOSPI','scenarioUST','scenarioSOX'];
+ if(ids.some(id=>$(id).value.trim()==='')){out.textContent='계산하려면 확정 종가와 시장 지표 네 가지의 실제 관찰값을 모두 입력하세요. 값이 없다고 0으로 가정하지 않습니다.';return;}
+ const [price,nq,kospi,ust,sox]=ids.map(id=>Number($(id).value));
+ if(!Number.isFinite(price)||price<=0||price>1e9||![nq,kospi,sox].every(v=>Number.isFinite(v)&&Math.abs(v)<=30)||!Number.isFinite(ust)||Math.abs(ust)>150){out.textContent='입력 범위를 확인하세요. 종가는 1원 이상, 지수 변동률은 ±30% 이내, 금리 변화는 ±150bp 이내로 입력합니다.';return;}
+ const w=scenarioWeights[$('scenarioCategory').value];
+ const contributions={NQ:nq*w.nq,야선:kospi*w.kospi,SOX:sox*w.sox,금리:ust*w.rate};
+ const pct=Object.values(contributions).reduce((a,b)=>a+b,0);
+ const hypothetical=Math.max(0,Math.round(price*(1+pct/100)));
+ const name=$('scenarioName').value.trim()||'선택 종목';
+ const headline=document.createElement('strong');headline.textContent=`${name} · 예시 시초가 ${hypothetical.toLocaleString('ko-KR')}원`;
+ const detail=document.createElement('div');detail.textContent=`입력 종가 ${Math.round(price).toLocaleString('ko-KR')}원 × 가정변화 ${pct>=0?'+':''}${pct.toFixed(2)}% = ${hypothetical.toLocaleString('ko-KR')}원`;
+ const basis=document.createElement('div');basis.className='assumption';basis.textContent=`기여값(퍼센트포인트): 나스닥 ${contributions.NQ.toFixed(2)}, 야선 ${contributions.야선.toFixed(2)}, SOX ${contributions.SOX.toFixed(2)}, 금리 ${contributions.금리.toFixed(2)}. 시장 변동 시각 일치 확인 필요.`;
+ const caveat=document.createElement('div');caveat.className='assumption';caveat.textContent='⚠️ 통계적 예상액이 아닌 수동 입력 가정 시나리오입니다. 추정 신뢰구간, 맞을 확률, 실거래 기대수익이 아닙니다.';
+ out.append(headline,detail,basis,caveat);
+});
+const base=(location.hostname.endsWith('.github.io')&&location.pathname.includes('jongbe-scanner'))?'./':'https://parksunghwa77.github.io/jongbe-scanner/';
+const labels={bb_reentry:'볼린저 하단 재진입',bb_squeeze_breakout:'스퀴즈 후 상단 돌파',bb_breakout_volume:'상단 돌파+거래량',red_soldiers:'적삼병',black_soldiers:'흑삼병',cloud_breakout:'구름대 상향 돌파',cloud_failed:'구름대 돌파 실패'};
+let active=null,last=[],shown=20,asof='-',incomplete=false;
+const money=n=>Number(n||0).toLocaleString('ko-KR');
+const safeNumber=n=>Number.isFinite(Number(n))?Number(n):null;
+const make=(type,cls,content)=>{const el=document.createElement(type);if(cls)el.className=cls;if(content!==undefined)el.textContent=String(content);return el};
+function setStatus(t){$('status').textContent=t;}
+function abort(){if(active){active.abort();active=null;setStatus('사용자가 검색을 중단했습니다. 이전 검색 결과는 더 이상 사용하지 마세요.');$('search').disabled=false;$('cancel').disabled=true;}}
+$('cancel').addEventListener('click',abort);
+const getJSON=async(path,signal)=>{const res=await fetch(base+path,{signal,cache:'no-store'});if(!res.ok)throw Error(path+' HTTP '+res.status);return res.json()};
+function chartSVG(analysis){
+ const bars=analysis.bars.slice(-60),bands=analysis.bb,offset=analysis.bars.length-bars.length;
+ if(!bars.length)return document.createTextNode('차트 없음');
+ const W=760,H=290,pad=26,innerW=W-pad*2,innerH=H-pad*2;
+ const values=bars.flatMap((b,i)=>[b.low,b.high,bands.lower[offset+i],bands.upper[offset+i]].filter(Number.isFinite));
+ const lo=Math.min(...values),hi=Math.max(...values),range=Math.max(hi-lo,1);
+ const y=v=>pad+(hi-v)/range*innerH,x=i=>pad+(i+.5)*innerW/bars.length;
+ const svg=document.createElementNS('http://www.w3.org/2000/svg','svg');svg.setAttribute('viewBox',`0 0 ${W} ${H}`);svg.setAttribute('role','img');svg.setAttribute('aria-label','최근 60거래일 캔들과 볼린저 상단, 중심, 하단 3선');
+ const nsel=(tag,attrs)=>{const e=document.createElementNS('http://www.w3.org/2000/svg',tag);for(const [k,v]of Object.entries(attrs))e.setAttribute(k,String(v));svg.append(e);return e};
+ const bandsDef=[['upper','var(--chart-upper)'],['middle','var(--chart-middle)'],['lower','var(--chart-lower)']];
+ for(const [key,color] of bandsDef){const pts=bars.map((_,i)=>({i,v:bands[key][offset+i]})).filter(z=>Number.isFinite(z.v)).map(z=>`${x(z.i).toFixed(1)},${y(z.v).toFixed(1)}`).join(' ');if(pts)nsel('polyline',{points:pts,fill:'none',stroke:color,'stroke-width':'2'});}
+ bars.forEach((b,i)=>{const xx=x(i),rising=b.close>=b.open,color=rising?'var(--candle-up)':'var(--candle-down)';nsel('line',{x1:xx,x2:xx,y1:y(b.high),y2:y(b.low),stroke:color,'stroke-width':'1.1'});const top=Math.min(y(b.open),y(b.close)),height=Math.max(1.3,Math.abs(y(b.close)-y(b.open)));nsel('rect',{x:xx-Math.max(1,innerW/bars.length*.29),y:top,width:Math.max(2,innerW/bars.length*.58),height,fill:color});});
+ return svg;
+}
+function render(){
+ const out=$('results');out.replaceChildren();const slice=last.slice(0,shown);
+ if(!last.length){out.append(make('p','','조건에 맞는 종목이 없거나 차트 파일을 확인하지 못했습니다.'));$('more').classList.add('hidden');return;}
+ for(const row of slice){const {stock:x,analysis:a,cap}=row;
+ const card=make('article','card'),top=make('div','cardtop'),left=make('div');
+ left.append(make('div','title',`${x.name} (${x.code})`),make('div','sub',`${x.market} · 종가 ${money(x.price)}원 · 종베 ${x.score??'-'}점 · 위험 ${x.risk_score??'미계산'} · 거래대금 ${money(x.value_eok)}억원`));
+ const danger=a.risk==='danger'||x.risk_level==='high'||x.chase_risk===true;
+ const pill=make('span','pill '+(danger?'danger':'signal'),danger?'🔴 위험 관찰':'🟢 상승 조건 관찰');top.append(left,pill);card.append(top);
+ const tags=make('div','tags');for(const name of a.signals)tags.append(make('span','tag',labels[name]||name));card.append(tags);
+ const d=document.createElement('details'),summary=make('summary','','자세히: 3선 차트·설명·지표');d.append(summary);
+ const detail=make('div','detail');const threshold=cap===null?'시가총액 미확인':`시가총액 ${(cap/1e8).toLocaleString('ko-KR',{maximumFractionDigits:0})}억원`;
+ const rv=a.volumeRatio==null?'확인 불가':a.volumeRatio.toFixed(2)+'배';
+ detail.append(make('div','',`${threshold} · 거래량/전20일 ${rv} · 데이터 기준일 ${asof}`));
+ detail.append(make('div','',danger?'과열·하락 조건이 감지됐습니다. 매매 전 별도 검증이 필요합니다.':'기술적 조건 충족은 수익 확률이나 매수 추천이 아닙니다.'));
+ detail.append(make('div','legend','주황: 볼린저 상단 | 연하늘: 중심선(20일) | 파랑: 하단 | 빨강/파랑: 양봉/음봉'));
+ d.addEventListener('toggle',()=>{if(d.open&&!detail.querySelector('svg'))detail.append(chartSVG(a))});d.append(detail);card.append(d);const scenarioBtn=make('button','secondary','📊 이 종목으로 시초가 시나리오');scenarioBtn.type='button';scenarioBtn.style.cssText='font-size:12px;margin-top:10px';scenarioBtn.addEventListener('click',()=>{ $('scenarioName').value=String(x.name||'');$('scenarioClose').value=String(x.price||'');$('scenarioResult').classList.add('hidden');$('scenarioPanel').scrollIntoView({behavior:'smooth',block:'start'});});card.append(scenarioBtn);out.append(card);
+ }
+ $('more').classList.toggle('hidden',shown>=last.length);
+}
+$('more').addEventListener('click',()=>{shown+=20;render()});
+function stats(values){const s=$('stats');s.replaceChildren();for(const [label,n] of values)s.append(make('div','stat',`${label}: ${money(n)}`));}
+function adjusted(x){const base=safeNumber(x.score)||0;const risk=safeNumber(x.risk_score);return base-(risk!==null?Math.min(40,Math.round(risk*.5)):0);}
+$('export').addEventListener('click',()=>{if(!last.length)return;const cols=['code','name','market','date','price','score','risk_score','value_eok','market_cap_krw','signals','observation'];const safeCsv=v=>'"'+String(v??'').replaceAll('"','""')+'"';const rows=[cols.join(',')];for(const r of last){const x=r.stock;const row=[x.code,x.name,x.market,asof,x.price,x.score,x.risk_score,x.value_eok,r.cap,r.analysis.signals.map(v=>labels[v]).join('|'),r.analysis.risk];rows.push(row.map(safeCsv).join(','));}const blob=new Blob(['\ufeff'+rows.join('\r\n')],{type:'text/csv;charset=utf-8'});const u=URL.createObjectURL(blob),a=make('a');a.href=u;a.download=`jongbe-v88-${asof}.csv`;document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(u),2000)});
+$('search').addEventListener('click',async()=>{
+ if(active)abort();const ctrl=new AbortController();active=ctrl;$('search').disabled=true;$('cancel').disabled=false;$('export').disabled=true;
+ $('error').textContent='';$('results').replaceChildren();$('stats').replaceChildren();last=[];shown=20;incomplete=false;
+ const opts={signal:$('signal').value,size:$('size').value,turnover:Number($('turnover').value),market:$('market').value,strictness:Number($('strict').value),order:$('order').value};
+ try {
+  setStatus('공개 확정 일봉 종목 목록을 조회 중…');
+  const listing=await getJSON('results.json?rnd='+Date.now(),ctrl.signal);
+  if(!Array.isArray(listing.rows)||!/^\d{4}-\d{2}-\d{2}$/.test(listing.asof||''))throw Error('정상적인 확정 일봉이 게시되지 않았습니다. GitHub Actions 자동 분석 상태를 확인하세요.');
+  asof=listing.asof;
+  const delayed=listing.data_status==='delayed'||(listing.expected_asof&&listing.expected_asof>asof);
+  if(delayed)$('error').textContent=`⚠️ 원본 데이터 지연: 기준일 ${asof}, 기대일 ${listing.expected_asof||'미확인'}. 당일 매매 판단에 사용하지 마세요.\n`;
+  const universe=listing.rows.filter(x=>/^\d{6}$/.test(String(x.code))&&(opts.market==='ALL'||x.market===opts.market)&&Number(x.value_eok)>=opts.turnover);
+  const groups=new Map();for(const x of universe){const pre=String(x.code).slice(0,2);if(!groups.has(pre))groups.set(pre,[]);groups.get(pre).push(x);}
+  const entries=[...groups.entries()];let cursor=0,done=0,failed=0,scanned=0,unknown=0;
+  async function worker(){while(cursor<entries.length){const entry=entries[cursor++],prefix=entry[0],rows=entry[1];
+   if(ctrl.signal.aborted)throw DOMException('Aborted','AbortError');
+   try {const blob=await getJSON(`charts/${prefix}.json?asof=${encodeURIComponent(asof)}`,ctrl.signal);
+    if(blob.schema!=='jongbe-ohlcv-v1'||blob.asof!==asof||typeof blob.stocks!=='object')throw Error('기준일 또는 차트 형식 불일치');
+    for(const x of rows){const c=blob.profiles?.[x.code]?.market_cap_krw,cap=c===null||c===undefined||!Number.isFinite(Number(c))?null:Number(c);
+     if(cap===null)unknown++;
+     if(opts.size==='large'&&(cap===null||cap<5000*1e8))continue;
+     if(opts.size==='unknown'&&cap!==null)continue;
+     const a=JongbeV88.analyze(blob.stocks?.[x.code],{strictness:opts.strictness});scanned++;
+     if(!a.ready||!a.signals.length||(opts.signal!=='all'&&!a.signals.includes(opts.signal)))continue;
+     last.push({stock:x,analysis:a,cap});
+    }
+   }catch(e){if(ctrl.signal.aborted)throw e;failed++;incomplete=true;}
+   done++;setStatus(`기준일 ${asof} · 차트 묶음 ${done}/${entries.length} · 기술 조건 발견 ${last.length}건 · 파일 실패 ${failed}건`);
+  }}
+  await Promise.all(Array.from({length:Math.min(4,entries.length)},worker));
+  if(ctrl.signal.aborted)return;
+  if(opts.order==='score')last.sort((a,b)=>adjusted(b.stock)-adjusted(a.stock)||Number(b.stock.value_eok)-Number(a.stock.value_eok));
+  if(opts.order==='money')last.sort((a,b)=>Number(b.stock.value_eok)-Number(a.stock.value_eok));
+  if(opts.order==='date')last.sort((a,b)=>String(a.stock.name).localeCompare(String(b.stock.name),'ko'));
+  render();$('export').disabled=!last.length;
+  stats([['후보',universe.length],['기술조건 발견',last.length],['분석 검토',scanned],['시총 미확인',unknown],['파일 오류',failed]]);
+  setStatus(`완료 · 확정 일봉 ${asof} · 조건 발견 ${last.length}건`+(failed?` · ⚠️ ${failed}개 차트 묶음 조회 실패, 결과 불완전`:''));
+  if(failed)$('error').textContent+=`⚠️ ${failed}개 차트 묶음을 읽지 못해 검색 결과가 누락될 수 있습니다.\n`;
+ }catch(e){if(e.name!=='AbortError'){setStatus('검색 실패');$('error').textContent+='오류: '+e.message;}}
+ finally{if(active===ctrl){active=null;$('search').disabled=false;$('cancel').disabled=true;}}
+});
+})();
+</script>
+</body></html>
