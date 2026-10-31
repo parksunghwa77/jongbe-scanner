@@ -1,0 +1,218 @@
+name: V8.8.4 NH to existing indicators integration check (read-only)
+'on':
+  push:
+    branches:
+    - v8.8.4-test
+    paths:
+    - .github/workflows/v884-nh-indicators-integration.yml
+  workflow_dispatch: {}
+permissions:
+  contents: read
+jobs:
+  integrate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      NHPLUG_APP_KEY: ${{ secrets.NAMUH_APP_KEY }}
+      NHPLUG_APP_SECRET: ${{ secrets.NAMUH_APP_SECRET_KEY }}
+      NHPLUG_BASE_URL: https://api.nhplug.com:8443
+      NHPLUG_AUTH_URL: https://api.nhplug.com:8443
+      NHPLUG_RATE_LIMIT: '2'
+    steps:
+    - name: Checkout existing V8.8.4 code
+      uses: actions/checkout@v4
+    - name: Python 3.11
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+    - name: Node.js 24
+      uses: actions/setup-node@v4
+      with:
+        node-version: '24'
+    - name: Install read-only SDK and calendar
+      run: python -m pip install --disable-pip-version-check "nhplug==0.4.1" "exchange-calendars>=4.9,<5" pandas
+    - name: Bridge 452 NH regular candles into unchanged JS indicators (2 stocks)
+      shell: bash
+      run: |-
+        set -euo pipefail
+        trap 'rm -f nh-bars-private.json' EXIT
+        cat > /tmp/v884_nh_bridge_core.py <<'PYTHON'
+        #!/usr/bin/env python3
+        """Read-only NH PLUG OHLCV bridge for the existing Jongbe V8.8 JS engine.
+
+        Use only in an isolated GitHub Actions runner. Do not publish licensed bars
+        or merge NH regular session data with Marcap historical sessions.
+        """
+        import argparse
+        import json
+        import os
+        import re
+        from datetime import datetime
+        from pathlib import Path
+
+        import exchange_calendars as xcals
+        import pandas as pd
+
+        KNOWN_CLOSED = frozenset({'2026-06-03', '2026-07-17'})
+        REQUIRED = 452
+
+
+        class UnsafeBar(ValueError):
+            pass
+
+
+        def parse_day(value):
+            s = str(value or '').strip()
+            for fmt in ('%y/%m/%d', '%Y-%m-%d', '%Y%m%d', '%Y/%m/%d', '%y%m%d'):
+                try:
+                    d = datetime.strptime(s, fmt).date()
+                    if 2020 <= d.year <= 2030:
+                        return d.isoformat()
+                except ValueError:
+                    pass
+            return None
+
+
+        def positive_int(value, zero_ok=False):
+            if value is None or isinstance(value, bool):
+                return None
+            s = str(value).strip().replace(',', '')
+            if not re.fullmatch(r'\d{1,14}', s):
+                return None
+            n = int(s)
+            return n if (n >= 0 if zero_ok else n > 0) else None
+
+
+        def expected_sessions(target, size=REQUIRED):
+            if parse_day(target) != target:
+                raise UnsafeBar('Invalid target date')
+            cal = xcals.get_calendar('XKRX')
+            end = pd.Timestamp(target)
+            start = end - pd.Timedelta(days=1250)
+            dates = [x.date().isoformat() for x in cal.sessions_in_range(start, end)
+                     if x.date().isoformat() not in KNOWN_CLOSED]
+            if len(dates) < size or dates[-1] != target:
+                raise UnsafeBar('Target must be a confirmed past exchange session')
+            return dates[-size:]
+
+
+        def normalize_nh_bars(raw_rows, target, size=REQUIRED):
+            if not isinstance(raw_rows, list):
+                raise UnsafeBar('NH daily array is missing')
+            dates = expected_sessions(target, size)
+            parsed = {}
+            for r in raw_rows:
+                if not isinstance(r, dict):
+                    raise UnsafeBar('Invalid bar record')
+                d = parse_day(r.get('bsop_date'))
+                if d is None:
+                    raise UnsafeBar('Date parse error')
+                if d > target:
+                    continue
+                o = positive_int(r.get('stck_oprc'))
+                h = positive_int(r.get('stck_hgpr'))
+                lo = positive_int(r.get('stck_lwpr'))
+                c = positive_int(r.get('stck_clpr'))
+                v = positive_int(r.get('acml_vol'), zero_ok=True)
+                if None in (o, h, lo, c, v) or not (lo <= o <= h and lo <= c <= h):
+                    raise UnsafeBar('OHLCV invariant violation')
+                row = [d, o, h, lo, c, v]
+                if d in parsed and parsed[d] != row:
+                    raise UnsafeBar('Conflicting duplicate date')
+                parsed[d] = row
+            missing = [d for d in dates if d not in parsed]
+            if missing:
+                raise UnsafeBar('Missing expected KRX sessions: ' + ','.join(missing[:3]))
+            return [parsed[d] for d in dates]
+
+
+        def selftest():
+            target = '2026-10-30'
+            days = expected_sessions(target)
+            assert len(days) == REQUIRED
+            assert '2026-06-03' not in days and '2026-07-17' not in days
+            sample = [{'bsop_date': x[2:].replace('-', '/'), 'stck_oprc': '100',
+                       'stck_hgpr': '103', 'stck_lwpr': '98',
+                       'stck_clpr': '101', 'acml_vol': '1000'} for x in days]
+            assert len(normalize_nh_bars(sample, target)) == REQUIRED
+            assert parse_day('26/10/30') == target
+            for bad in (sample[1:], sample + [dict(sample[-1], stck_clpr='102')],
+                        sample[:-1] + [dict(sample[-1], stck_hgpr='99')]):
+                try:
+                    normalize_nh_bars(bad, target)
+                except UnsafeBar:
+                    pass
+                else:
+                    raise AssertionError('Expected bar validation failure')
+            print('PASS local parser/calendar/duplicate/OHLCV tests')
+
+
+        def fetch_two(target, output):
+            if not os.getenv('NHPLUG_APP_KEY') or not os.getenv('NHPLUG_APP_SECRET'):
+                raise SystemExit('NHPLUG GitHub Secrets unavailable; no tokens logged')
+            from nhplug import call
+            stocks = [('005930', '삼성전자'), ('000660', 'SK하이닉스')]
+            data = {'schema': 'jongbe-v884-nh-private-bars-v1',
+                    'source': 'NHPLUG', 'market_cd': 'KRX',
+                    'view_main_yn': 'Y', 'asof': target, 'stocks': []}
+            for code, name in stocks:
+                try:
+                    answer = call('/krstock/quote/v1/currentDaily', {
+                        'market_cd': 'KRX', 'iem_cd': code,
+                        'array_cnt': str(REQUIRED), 'view_main_yn': 'Y',
+                    })
+                    rows = answer.get('Output_0') if isinstance(answer, dict) else None
+                    if isinstance(rows, dict):
+                        rows = [rows]
+                    bars = normalize_nh_bars(rows, target)
+                except Exception as exc:
+                    # Do not expose HTTP error details (could contain authentication info).
+                    raise SystemExit(f'{code} bridge blocked: {type(exc).__name__}') from None
+                data['stocks'].append({'code': code, 'name': name, 'bars': bars})
+                print(f'{code} NH KRX regular: {len(bars)} valid dated sessions')
+            out = Path(output)
+            out.parent.mkdir(parents=True, exist_ok=True)
+            # PRIVATE RUNNER FILE ONLY: never add to git or upload as artifact.
+            out.write_text(json.dumps(data, ensure_ascii=False), encoding='utf-8')
+
+
+        if __name__ == '__main__':
+            p = argparse.ArgumentParser()
+            p.add_argument('--selftest', action='store_true')
+            p.add_argument('--probe', action='store_true')
+            p.add_argument('--asof', default='2026-10-30')
+            p.add_argument('--output', default='nh-bars-private.json')
+            args = p.parse_args()
+            if args.selftest:
+                selftest()
+            if args.probe:
+                fetch_two(args.asof, args.output)
+        PYTHON
+        python /tmp/v884_nh_bridge_core.py --selftest
+        python /tmp/v884_nh_bridge_core.py --probe --asof 2026-10-30 --output nh-bars-private.json
+        node <<'NODE'
+        const fs=require('node:fs'),assert=require('node:assert/strict');
+        const engine=require('./v88/v88-engine.js');
+        const input=JSON.parse(fs.readFileSync('nh-bars-private.json','utf8'));
+        assert.equal(input.market_cd,'KRX');assert.equal(input.view_main_yn,'Y');
+        const result={schema:'jongbe-v884-nh-indicators-v1',asof:input.asof,source:'NHPLUG KRX regular',site_changed:false,orders_or_account_used:false,rows:[]};
+        for(const stock of input.stocks){
+          assert.equal(stock.bars.length,452);
+          const computed=engine.analyze(stock.bars);
+          assert.equal(computed.ready,true,stock.code+' indicator not ready');
+          assert.equal(computed.bars.length,452);
+          result.rows.push({code:stock.code,valid_sessions:stock.bars.length,ready:computed.ready,signals:computed.signals,risk:computed.risk});
+          console.log(stock.code+' existing indicator engine OK, 452 sessions, '+computed.signals.length+' signals');
+        }
+        assert.equal(result.rows.length,2);
+        fs.writeFileSync('v884-nh-indicator-summary.json',JSON.stringify(result,null,2)+'\n');
+        console.log('PASS: NH regular 452 sessions linked to existing V8.8 signal engine; scanner site unchanged');
+        NODE
+    - name: Upload NON-price diagnostic only
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: v884-nh-indicator-summary-${{ github.run_id }}
+        path: v884-nh-indicator-summary.json
+        if-no-files-found: ignore
+        retention-days: 7
