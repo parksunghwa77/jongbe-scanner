@@ -1,0 +1,273 @@
+name: V8.8.4 NH 100-stock signal bridge (read-only)
+
+on:
+  push:
+    branches: [v8.8.4-test]
+    paths:
+      - '.github/workflows/v884-nh-100-batch-signal.yml'
+  workflow_dispatch:
+    inputs:
+      batch_index:
+        description: '100-stock segment index (0-24, beginning at 0)'
+        required: true
+        default: '0'
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: v884-nh-bridge-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  nh-signal-bridge:
+    name: Read-only NH batch + original indicators
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      NHPLUG_APP_KEY: ${{ secrets.NAMUH_APP_KEY }}
+      NHPLUG_APP_SECRET: ${{ secrets.NAMUH_APP_SECRET_KEY }}
+      NHPLUG_BASE_URL: https://api.nhplug.com:8443
+      NHPLUG_AUTH_URL: https://api.nhplug.com:8443
+      NHPLUG_RATE_LIMIT: '1'
+      BATCH_INDEX: ${{ github.event.inputs.batch_index || '0' }}
+    steps:
+      - name: Checkout isolated test branch
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Install quote-only SDK and KRX calendar
+        run: python -m pip install --disable-pip-version-check 'nhplug==0.4.1' 'exchange-calendars>=4.9,<5' pandas
+      - name: Check and scan one batch (private quotes not uploaded)
+        shell: bash
+        run: |
+          set -euo pipefail
+          trap 'rm -f private-nh-bars.json' EXIT
+          node --check v88/v88-engine.js
+          cat > /tmp/v884_nh_batch.py <<'PYTHON'
+          """Private 100-stock NHPLUG OHLCV -> unchanged Jongbe V8.8 indicator check.
+
+          CAUTION: this is a staged diagnostic, NOT an order strategy, public feed,
+          or approval to redistribute provider bars / derived indicators.
+          """
+          import collections
+          import json
+          import os
+          import re
+          import sys
+          import time
+          from datetime import datetime
+          from pathlib import Path
+
+          import exchange_calendars as ec
+          import pandas as pd
+
+          ASOF = '2026-10-30'
+          PREVIOUS_UNIVERSE_ASOF = '2026-10-29'
+          CLOSED = {'2026-06-03', '2026-07-17'}
+          HISTORY = 452
+          BATCH_SIZE = 100
+          UNIVERSE_FILE = Path('results.json')
+          TEMP = Path('private-nh-bars.json')
+          SUMMARY = Path('v884-nh-100-aggregate.json')
+
+          def parse_day(value):
+              raw = str(value or '').strip()
+              for fmt in ('%y/%m/%d', '%Y-%m-%d', '%Y%m%d', '%Y/%m/%d', '%y%m%d'):
+                  try:
+                      d = datetime.strptime(raw, fmt).date()
+                      if 2020 <= d.year <= 2030:
+                          return d.isoformat()
+                  except ValueError:
+                      pass
+              return None
+
+          def number(value, positive=False):
+              if isinstance(value, bool):
+                  return None
+              raw = str(value if value is not None else '').strip().replace(',', '')
+              if re.fullmatch(r'\d{1,15}', raw) is None:
+                  return None
+              n = int(raw)
+              return n if n >= (1 if positive else 0) else None
+
+          def dates():
+              calendar = ec.get_calendar('XKRX')
+              target = pd.Timestamp(ASOF)
+              all_days = [s.date().isoformat() for s in calendar.sessions_in_range(
+                  target - pd.Timedelta(days=1250), target)
+                  if s.date().isoformat() not in CLOSED]
+              assert len(all_days) >= HISTORY and all_days[-1] == ASOF
+              return all_days[-HISTORY:]
+
+          def normalize(rows, required):
+              if not isinstance(rows, list):
+                  return None, 'no_rows'
+              parsed = {}
+              for r in rows:
+                  if not isinstance(r, dict):
+                      return None, 'invalid_row'
+                  d = parse_day(r.get('bsop_date'))
+                  if d is None:
+                      return None, 'invalid_date'
+                  if d > ASOF:
+                      continue
+                  o = number(r.get('stck_oprc'), True)
+                  h = number(r.get('stck_hgpr'), True)
+                  l = number(r.get('stck_lwpr'), True)
+                  c = number(r.get('stck_clpr'), True)
+                  v = number(r.get('acml_vol'))
+                  if None in (o, h, l, c, v) or not (l <= min(o, c) <= max(o, c) <= h):
+                      return None, 'invalid_ohlcv'
+                  bar = [d, o, h, l, c, v]
+                  if d in parsed and parsed[d] != bar:
+                      return None, 'duplicate_conflict'
+                  parsed[d] = bar
+              if ASOF not in parsed:
+                  return None, 'target_missing'
+              if any(d not in parsed for d in required):
+                  return None, 'short_or_missing_history'
+              return [parsed[d] for d in required], 'ok'
+
+          def universe():
+              obj = json.loads(UNIVERSE_FILE.read_text(encoding='utf-8'))
+              if obj.get('asof') != PREVIOUS_UNIVERSE_ASOF:
+                  raise ValueError('Universe vintage changed. Verify before scanning.')
+              pools = {'KOSPI': set(), 'KOSDAQ': set()}
+              for row in obj.get('rows', []):
+                  code = str(row.get('code', '')).strip()
+                  market = row.get('market')
+                  if market in pools and re.fullmatch(r'\d{6}', code):
+                      pools[market].add(code)
+              a, b = sorted(pools['KOSPI']), sorted(pools['KOSDAQ'])
+              if len(a) < 500 or len(b) < 500:
+                  raise ValueError('Source universe too small')
+              # Interleave markets, preserve full coverage without repeat codes.
+              combined = []
+              for index in range(max(len(a), len(b))):
+                  if index < len(a):
+                      combined.append(('KOSPI', a[index]))
+                  if index < len(b):
+                      combined.append(('KOSDAQ', b[index]))
+              assert len(combined) == len(set(code for _, code in combined))
+              return combined
+
+          def selftest():
+              days = dates()
+              assert len(days) == HISTORY
+              assert '2026-06-03' not in days and '2026-07-17' not in days
+              demo = [{'bsop_date': d[2:].replace('-', '/'),
+                       'stck_oprc': '100', 'stck_hgpr': '105',
+                       'stck_lwpr': '95', 'stck_clpr': '101', 'acml_vol': '1000'} for d in days]
+              bars, reason = normalize(demo, days)
+              assert reason == 'ok' and len(bars) == HISTORY
+              assert normalize(demo[1:], days)[1] == 'short_or_missing_history'
+              assert normalize(demo + [dict(demo[-1], stck_clpr='103')], days)[1] == 'duplicate_conflict'
+              assert normalize([dict(demo[0], stck_hgpr='90')]+demo[1:], days)[1] == 'invalid_ohlcv'
+              print('PASS: NH calendar, OHLCV, duplicate, and missing-session self-tests')
+
+          def scan():
+              raw_index = os.environ.get('BATCH_INDEX', '0')
+              if re.fullmatch(r'\d{1,2}', raw_index) is None:
+                  raise ValueError('Batch index must be 0..24')
+              batch = int(raw_index)
+              all_stocks = universe()
+              partitions = (len(all_stocks) + BATCH_SIZE - 1) // BATCH_SIZE
+              if batch >= partitions:
+                  raise ValueError('Batch out of range')
+              chosen = all_stocks[batch*BATCH_SIZE:(batch+1)*BATCH_SIZE]
+              required = dates()
+              if not os.getenv('NHPLUG_APP_KEY') or not os.getenv('NHPLUG_APP_SECRET'):
+                  raise RuntimeError('NHPLUG GitHub Secrets unavailable')
+              from nhplug import call
+              counters = collections.Counter()
+              accepted = []
+              for index, (market, code) in enumerate(chosen, 1):
+                  try:
+                      response = call('/krstock/quote/v1/currentDaily', {
+                          'market_cd': 'KRX', 'iem_cd': code, 'array_cnt': str(HISTORY),
+                          'view_main_yn': 'Y',
+                      })
+                      rows = response.get('Output_0') if isinstance(response, dict) else None
+                      if isinstance(rows, dict):
+                          rows = [rows]
+                      bars, state = normalize(rows, required)
+                  except Exception:
+                      bars, state = None, 'api_or_transport_error'
+                  counters[state] += 1
+                  if bars is not None:
+                      # The private bars exist only in runner memory/ephemeral file.
+                      accepted.append({'code': code, 'market': market, 'bars': bars})
+                  if index % 25 == 0 or index == len(chosen):
+                      print(f'Progress {index}/{len(chosen)}; history-ready={counters["ok"]}; '
+                            f'not-ready={index-counters["ok"]}', flush=True)
+                  time.sleep(.8)  # Under 1 request/sec; no burst or automatic retries.
+              TEMP.write_text(json.dumps(accepted, ensure_ascii=False), encoding='utf-8')
+              TEMP.chmod(0o600)
+              result = {
+                  'schema': 'jongbe-v884-nh-100-batch-v1', 'asof': ASOF,
+                  'universe_asof': PREVIOUS_UNIVERSE_ASOF,
+                  'total_universe': len(all_stocks), 'total_batches': partitions,
+                  'batch_index': batch, 'batch_stock_count': len(chosen),
+                  'nh_regular_history_ready': counters['ok'],
+                  'not_ready_reasons': {k:v for k,v in sorted(counters.items()) if k != 'ok'},
+                  'quotes_saved_to_public_artifact': False, 'published_site_changed': False,
+                  'account_or_orders_used': False,
+                  'notice': 'Diagnostic only. Data licenses and full market production not yet approved.'
+              }
+              SUMMARY.write_text(json.dumps(result, ensure_ascii=False, indent=2)+'\n', encoding='utf-8')
+              print('NH historical-bar stage complete; no public quote export')
+
+          if __name__ == '__main__':
+              selftest()
+              scan()
+          PYTHON
+          python -m py_compile /tmp/v884_nh_batch.py
+          python /tmp/v884_nh_batch.py
+          node <<'NODE'
+          const fs=require('node:fs');
+          const assert=require('node:assert/strict');
+          const engine=require('./v88/v88-engine.js');
+          const summaryFile='v884-nh-100-aggregate.json';
+          const stocks=JSON.parse(fs.readFileSync('private-nh-bars.json','utf8'));
+          const report=JSON.parse(fs.readFileSync(summaryFile,'utf8'));
+          const counts={}, risk={}, failures={};
+          let ready=0;
+          for (const stock of stocks) {
+            try {
+              assert.equal(stock.bars.length, 452);
+              const result=engine.analyze(stock.bars);
+              if (!result.ready || result.bars.length !== 452) throw Error('not_ready');
+              ready++;
+              risk[result.risk]=(risk[result.risk]||0)+1;
+              for (const signal of result.signals) counts[signal]=(counts[signal]||0)+1;
+            } catch (e) {
+              const kind=e.message==='not_ready'?'engine_not_ready':'engine_error';
+              failures[kind]=(failures[kind]||0)+1;
+            }
+          }
+          report.analyzed_with_original_engine=ready;
+          report.signal_counts=counts;
+          report.risk_counts=risk;
+          report.engine_errors=failures;
+          report.batch_test_passed=ready>0 && Object.keys(failures).length===0;
+          fs.writeFileSync(summaryFile,JSON.stringify(report,null,2)+'\n');
+          console.log('V8.8 original engine history-ready analyzed:',ready,'/',stocks.length);
+          console.log('Signal aggregates only (no provider quotes):',JSON.stringify(counts));
+          if (!report.batch_test_passed) process.exitCode=1;
+          NODE
+      - name: Upload aggregate diagnostic only (no quote bars)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: v884-nh-batch-summary-${{ github.run_id }}
+          path: v884-nh-100-aggregate.json
+          retention-days: 7
+          if-no-files-found: warn
