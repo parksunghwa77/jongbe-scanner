@@ -1,0 +1,158 @@
+name: V8.8.4 Namuh 200-stock scaling probe (read-only)
+
+on:
+  push:
+    branches: [v8.8.4-test]
+    paths:
+      - '.github/workflows/v884-namuh-200-probe.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      NHPLUG_APP_KEY: ${{ secrets.NAMUH_APP_KEY }}
+      NHPLUG_APP_SECRET: ${{ secrets.NAMUH_APP_SECRET_KEY }}
+      NHPLUG_BASE_URL: https://api.nhplug.com:8443
+      NHPLUG_AUTH_URL: https://api.nhplug.com:8443
+      NHPLUG_RATE_LIMIT: '2'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install supported NH PLUG SDK
+        run: python -m pip install --disable-pip-version-check nhplug==0.4.1
+      - name: Read historical KRX regular closes for 200 stocks (plus 40 full-session comparisons)
+        shell: bash
+        run: |
+          python - <<'PY'
+          """Safe historical probe. Does not publish results to scanner website or place orders."""
+          import json, os, re, time
+          from collections import Counter
+          from datetime import datetime
+          from pathlib import Path
+          from zoneinfo import ZoneInfo
+          from nhplug import call
+
+          TARGET='2026-10-30'
+          PRIOR='2026-10-29'
+          OUT=Path('v884-probe200')
+          OUT.mkdir(exist_ok=True)
+          report={'schema':'jongbe-v884-namuh-scaling-probe-v1',
+                  'date':TARGET,'created_at_kst':datetime.now(ZoneInfo('Asia/Seoul')).isoformat(timespec='seconds'),
+                  'read_only':True,'rows':[], 'summary':{},
+                  'notes':['NH PLUG currentDaily KRX/Y is the labeled regular session price.',
+                           'KRX/N is full session, not necessarily NXT-only.',
+                           'Sample results do not demonstrate feasibility/licensing for all market stocks.',
+                           'No order/account/credential/secret data read or stored.']}
+          def save():
+              (OUT/'report.json').write_text(json.dumps(report,ensure_ascii=False,indent=2)+'\n',encoding='utf-8')
+          if not (os.environ.get('NHPLUG_APP_KEY') and os.environ.get('NHPLUG_APP_SECRET')):
+              report['summary']={'status':'credentials_not_configured'}
+              save()
+              raise SystemExit('NH PLUG GitHub Secrets not configured. Nothing requested.')
+
+          original=json.loads(Path('results.json').read_text(encoding='utf-8'))
+          if original.get('asof')!=PRIOR or not isinstance(original.get('rows'),list):
+              report['summary']={'status':'unexpected_previous_snapshot','snapshot_date':original.get('asof')}
+              save()
+              raise SystemExit('Expected 2026-10-29 test snapshot; site and prices unchanged.')
+
+          pools={'KOSPI':{},'KOSDAQ':{}}
+          for rec in original['rows']:
+              if not isinstance(rec,dict):continue
+              code=str(rec.get('code',''))
+              market=rec.get('market')
+              if market in pools and re.fullmatch(r'\d{6}',code):pools[market][code]=rec
+          selection=[]
+          for market in ('KOSPI','KOSDAQ'):
+              codes=sorted(pools[market])
+              if len(codes)<100:
+                  report['summary']={'status':'sample_universe_too_small','market':market,'count':len(codes)}
+                  save()
+                  raise SystemExit('Insufficient universe for '+market)
+              chosen=[codes[(i*(len(codes)-1))//99] for i in range(100)]
+              if market=='KOSPI':
+                  for required in ('005930','000660'):
+                      if required not in pools[market]:
+                          report['summary']={'status':'missing_reference','stock':required}
+                          save()
+                          raise SystemExit('Missing reference stock')
+                      if required not in chosen:
+                          chosen[-(1 if required=='005930' else 2)]=required
+              if len(set(chosen))!=100:raise SystemExit('Duplicate selection. No API requests made.')
+              selection.extend((market,code,pools[market][code]) for code in chosen)
+          full_session_sample={code for market,code,_ in selection[::5]} # 40 / 200
+
+          def parse_day(value):
+              if value is None:return None
+              for fmt in ('%y/%m/%d','%Y-%m-%d','%Y%m%d','%y%m%d','%Y/%m/%d'):
+                  try:
+                      d=datetime.strptime(str(value).strip(),fmt).date()
+                      if 2020<=d.year<=2030:return d.isoformat()
+                  except ValueError:pass
+              return None
+          def positive(value):
+              t=str(value if value is not None else '').replace(',','').strip()
+              return int(t) if re.fullmatch(r'\d{1,14}',t) and int(t)>0 else None
+          def get_bar(code, session):
+              # 30 rows is ample for last trading day, but never assume a dated row exists.
+              resp=call('/krstock/quote/v1/currentDaily',{
+                  'market_cd':'KRX','iem_cd':code,'array_cnt':'30','view_main_yn':session})
+              bars=resp.get('Output_0') if isinstance(resp,dict) else None
+              if isinstance(bars,dict):bars=[bars]
+              if not isinstance(bars,list):return {'status':'missing_rows','row_count':0}
+              matches=[bar for bar in bars if isinstance(bar,dict) and parse_day(bar.get('bsop_date'))==TARGET]
+              if not matches:return {'status':'missing_target_date','row_count':len(bars)}
+              price=positive(matches[0].get('stck_clpr'))
+              if price is None:return {'status':'invalid_close','row_count':len(bars)}
+              return {'status':'ok','price':price,'row_count':len(bars)}
+
+          for i,(market,code,stock) in enumerate(selection,1):
+              row={'code':code,'market':market,'name':str(stock.get('name',''))[:80],
+                   'regular':{'status':'not_requested'},'full':{'status':'not_requested'},
+                   'previous_marcap_close':positive(stock.get('price'))}
+              for mode in (['Y','N'] if code in full_session_sample else ['Y']):
+                  try:result=get_bar(code,mode)
+                  except Exception as e:result={'status':'query_error','error_class':type(e).__name__}
+                  row['regular' if mode=='Y' else 'full']=result
+                  # Deliberately below max rate: no bursts against the quote provider.
+                  time.sleep(.75)
+              report['rows'].append(row)
+              print(f'{i:03d}/200 {code} {market}: regular={row["regular"].get("status")} '
+                    f'full={row["full"].get("status")}',flush=True)
+              # Save periodically so an interrupted run still yields a partial report.
+              if i%25==0:save()
+
+          counts=Counter(x['regular']['status'] for x in report['rows'])
+          full_counts=Counter(x['full']['status'] for x in report['rows'] if x['full']['status']!='not_requested')
+          reg_ok=counts['ok'];full_ok=full_counts['ok']
+          refs={}
+          for code in ('005930','000660'):
+              row=next(r for r in report['rows'] if r['code']==code)
+              refs[code]=row['regular'].get('price')
+          report['summary']={'stock_count':len(report['rows']),'regular_ok':reg_ok,
+                             'regular_statuses':dict(counts),'full_checked':len(full_session_sample),
+                             'full_ok':full_ok,'full_statuses':dict(full_counts),
+                             'references':refs,'scaling_sample_passed':reg_ok>=190 and full_ok>=36 and
+                                 refs.get('005930')==225000 and refs.get('000660')==1418000,
+                             'site_modified':False,'trading_or_account_used':False}
+          save()
+          print('SUMMARY '+json.dumps(report['summary'],ensure_ascii=False),flush=True)
+          if not report['summary']['scaling_sample_passed']:
+              raise SystemExit('200-stock sample needs review. Historical source not switched.')
+          print('PASS: 200-stock read-only sample. Whole-universe production NOT approved by this test.')
+          PY
+      - name: Store diagnostic report (also if the quota or schema prevents full collection)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: jongbe-v884-namuh-200-probe-${{ github.run_id }}
+          path: v884-probe200/report.json
+          if-no-files-found: warn
+          retention-days: 7
