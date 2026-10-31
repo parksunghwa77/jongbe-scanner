@@ -1,0 +1,222 @@
+name: V8.8.4 Namuh 500-stock staged read-only scale check
+
+on:
+  push:
+    branches: [v8.8.4-test]
+    paths:
+      - '.github/workflows/v884-namuh-500-stage.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  stage500:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      NHPLUG_APP_KEY: ${{ secrets.NAMUH_APP_KEY }}
+      NHPLUG_APP_SECRET: ${{ secrets.NAMUH_APP_SECRET_KEY }}
+      NHPLUG_BASE_URL: https://api.nhplug.com:8443
+      NHPLUG_AUTH_URL: https://api.nhplug.com:8443
+      NHPLUG_RATE_LIMIT: '2'
+    steps:
+      - name: Check out isolated test branch
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install NHPLUG official SDK
+        run: python -m pip install --disable-pip-version-check nhplug==0.4.1
+      - name: Validate 500 regular closes and 50 full-session closes
+        shell: bash
+        run: |
+          python - <<'PY'
+          """Read-only scaling experiment. Never updates the website or places orders.
+
+          Deliberately outputs aggregates instead of a public dump of vendor quotes.
+          Keeps market source and session definitions separate and never guesses dates.
+          """
+          import json
+          import os
+          import re
+          import time
+          from collections import Counter
+          from datetime import datetime
+          from pathlib import Path
+          from zoneinfo import ZoneInfo
+
+          from nhplug import call
+
+          TARGET = '2026-10-30'
+          PRIOR = '2026-10-29'
+          SOURCE = Path('results.json')
+          OUT = Path('v884-stage-500-summary.json')
+          REF = {
+              '005930': {'Y': 225000, 'N': 220500},
+              '000660': {'Y': 1418000, 'N': 1391000},
+          }
+          report = {
+              'schema': 'jongbe-v884-stage500-aggregate-v1',
+              'asof': TARGET,
+              'created_kst': datetime.now(ZoneInfo('Asia/Seoul')).isoformat(timespec='seconds'),
+              'read_only': True,
+              'quote_endpoint': '/krstock/quote/v1/currentDaily',
+              'market_cd': 'KRX',
+              'view_main_yn': {'Y': 'regular session', 'N': 'all sessions'},
+              'note': 'This experiment does not update site data or prove production-scale / redistribution permission.',
+          }
+
+          def save():
+              OUT.write_text(json.dumps(report, ensure_ascii=False, indent=2)+'\n', encoding='utf-8')
+
+          if not os.getenv('NHPLUG_APP_KEY') or not os.getenv('NHPLUG_APP_SECRET'):
+              report['status'] = 'missing_secrets'
+              save()
+              raise SystemExit('Missing GitHub Secrets; no credentials printed.')
+          if not SOURCE.is_file():
+              report['status'] = 'snapshot_missing'
+              save()
+              raise SystemExit('Previous-day test snapshot missing.')
+          data = json.loads(SOURCE.read_text(encoding='utf-8'))
+          if data.get('asof') != PRIOR:
+              report['status'] = 'snapshot_vintage_changed'
+              report['snapshot_date'] = data.get('asof')
+              save()
+              raise SystemExit('Expected prior dated snapshot changed; do not guess a newer one.')
+
+          pools = {'KOSPI': {}, 'KOSDAQ': {}}
+          for row in data.get('rows', []):
+              if not isinstance(row, dict):
+                  continue
+              market = row.get('market')
+              code = str(row.get('code', ''))
+              if market in pools and re.fullmatch(r'\d{6}', code):
+                  pools[market][code] = str(row.get('name', ''))[:80]
+
+          selection = []
+          for market in ('KOSPI', 'KOSDAQ'):
+              choices = sorted(pools[market])
+              if len(choices) < 250:
+                  report['status'] = 'not_enough_listings'
+                  report['market'] = market
+                  report['listing_count'] = len(choices)
+                  save()
+                  raise SystemExit('Insufficient listing count.')
+              mandatory = ['005930','000660'] if market == 'KOSPI' else []
+              if any(x not in pools[market] for x in mandatory):
+                  raise SystemExit('Mandatory verification stock not found in snapshot.')
+              others = [x for x in choices if x not in mandatory]
+              count = 250-len(mandatory)
+              selected = mandatory + [others[i*(len(others)-1)//(count-1)] for i in range(count)]
+              if len(set(selected)) != 250:
+                  raise SystemExit('Sample contains duplicate tickers.')
+              selection.extend((market, code) for code in selected)
+
+          # Full-session sample: 25 per market, plus both mandatory KOSPI references.
+          full_sample = {code for _,code in selection[::10]}
+          full_sample.update(REF)
+          summary = {'sample': len(selection), 'requested_full_mode': len(full_sample),
+                     'regular_ok': 0, 'full_ok': 0, 'regular_errors': {}, 'full_errors': {},
+                     'reference_checked': {}, 'stopped_early': False}
+          errors_regular = Counter()
+          errors_full = Counter()
+          consecutive_failures = 0
+          # Only public reference prices are retained; no raw API responses stored.
+          reference = {code: {} for code in REF}
+
+          def to_day(value):
+              value = str(value or '').strip()
+              for fmt in ('%y/%m/%d', '%Y-%m-%d', '%Y%m%d', '%y%m%d'):
+                  try:
+                      d = datetime.strptime(value, fmt).date()
+                      if 2020 <= d.year <= 2030:
+                          return d.isoformat()
+                  except ValueError:
+                      pass
+              return None
+
+          def positive_number(raw, allow_zero=False):
+              s = str(raw if raw is not None else '').replace(',', '').strip()
+              if not re.fullmatch(r'\d{1,15}', s):
+                  return None
+              v = int(s)
+              return v if (v >= 0 if allow_zero else v > 0) else None
+
+          def request_close(code, mode):
+              try:
+                  res = call('/krstock/quote/v1/currentDaily', {
+                      'market_cd': 'KRX', 'iem_cd': code,
+                      'array_cnt': '10', 'view_main_yn': mode,
+                  })
+                  rows = res.get('Output_0') if isinstance(res,dict) else None
+                  if isinstance(rows,dict):
+                      rows = [rows]
+                  if not isinstance(rows,list) or not rows:
+                      return 'missing_rows', None
+                  dayrow = next((r for r in rows if isinstance(r,dict) and to_day(r.get('bsop_date')) == TARGET), None)
+                  if dayrow is None:
+                      return 'missing_target_day', None
+                  close = positive_number(dayrow.get('stck_clpr'))
+                  high = positive_number(dayrow.get('stck_hgpr'))
+                  low = positive_number(dayrow.get('stck_lwpr'))
+                  opening = positive_number(dayrow.get('stck_oprc'))
+                  vol = positive_number(dayrow.get('acml_vol'), True)
+                  if None in (close, high, low, opening, vol) or not(low <= close <= high and low <= opening <= high):
+                      return 'invalid_ohlcv', None
+                  return 'ok', close
+              except Exception as e:
+                  # Do not print exception or response: they may contain credentials.
+                  return 'request_'+type(e).__name__, None
+
+          for i,(market,code) in enumerate(selection, 1):
+              modes = ('Y','N') if code in full_sample else ('Y',)
+              for mode in modes:
+                  status, close = request_close(code, mode)
+                  c = errors_regular if mode == 'Y' else errors_full
+                  if status == 'ok':
+                      summary['regular_ok' if mode == 'Y' else 'full_ok'] += 1
+                      consecutive_failures = 0
+                  else:
+                      c[status] += 1
+                      consecutive_failures += 1
+                  if code in REF and close is not None:
+                      reference[code][mode] = close
+                  # Deliberately slower than 2/s and no burst retries.
+                  time.sleep(0.75)
+                  if consecutive_failures >= 15:
+                      summary['stopped_early'] = True
+                      break
+              if i % 25 == 0:
+                  print(f'Progress {i}/{len(selection)}; valid regular={summary["regular_ok"]}; full={summary["full_ok"]}; errors={sum(errors_regular.values())+sum(errors_full.values())}', flush=True)
+              if summary['stopped_early']:
+                  break
+          summary['regular_errors'] = dict(errors_regular)
+          summary['full_errors'] = dict(errors_full)
+          summary['reference_checked'] = {
+              code: {mode: {'matches_previous_reference': reference[code].get(mode) == expected}
+                     for mode, expected in checks.items()}
+              for code, checks in REF.items()
+          }
+          summary['sample_passed'] = (
+              not summary['stopped_early'] and
+              summary['regular_ok'] >= 490 and
+              summary['full_ok'] >= max(45, len(full_sample)-2) and
+              all(one['matches_previous_reference'] for modes in summary['reference_checked'].values() for one in modes.values())
+          )
+          report['summary'] = summary
+          save()
+          print('SUMMARY '+json.dumps(summary, ensure_ascii=False), flush=True)
+          if not summary['sample_passed']:
+              raise SystemExit('Sample insufficient; production source unchanged. Review report before scaling.')
+          print('PASS: 500-stock staged read-only sample; not yet production authorization.')
+          PY
+      - name: Save aggregate test summary (never credentials or bulk prices)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: v884-namuh-500-summary-${{ github.run_id }}
+          path: v884-stage-500-summary.json
+          retention-days: 7
+          if-no-files-found: warn
