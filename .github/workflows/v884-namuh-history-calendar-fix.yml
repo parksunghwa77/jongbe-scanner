@@ -1,0 +1,192 @@
+name: V8.8.4 NH historical calendar correction verification (read-only)
+
+on:
+  push:
+    branches: [v8.8.4-test]
+    paths:
+      - '.github/workflows/v884-namuh-history-calendar-fix.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  audit-calendar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      NHPLUG_APP_KEY: ${{ secrets.NAMUH_APP_KEY }}
+      NHPLUG_APP_SECRET: ${{ secrets.NAMUH_APP_SECRET_KEY }}
+      NHPLUG_BASE_URL: https://api.nhplug.com:8443
+      NHPLUG_AUTH_URL: https://api.nhplug.com:8443
+      NHPLUG_RATE_LIMIT: '2'
+    steps:
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install read-only clients
+        run: python -m pip install --disable-pip-version-check 'nhplug==0.4.1' 'exchange-calendars>=4.9,<5' pandas
+      - name: Verify 2026 exchange holiday exceptions and 452-session history
+        shell: bash
+        run: |
+          python - <<'PY'
+          """Read-only date continuity audit. Nothing is pushed to public results.json.
+          2026-06-03: local election, KRX closed.
+          2026-07-17: Constitution Day, KRX closed.
+          Source: KRX closure announcement of 2026-05-20.
+          Both closures may be incorrectly classified as trading sessions in exchange_calendars.
+          Do not override any other missing days or silently synthesize bars.
+          """
+          import json, os, re, time
+          from datetime import date, datetime
+          from pathlib import Path
+          from zoneinfo import ZoneInfo
+          import exchange_calendars as xcals
+          import pandas as pd
+          from nhplug import call
+
+          TARGET = '2026-10-30'
+          REQUESTED = 452
+          NO_TRADE = {'2026-06-03', '2026-07-17'}
+          NAMES = [('005930', '삼성전자'), ('000660', 'SK하이닉스')]
+          OUT = Path('v884-calendar-audit.json')
+
+          def parse_day(raw):
+              s = str(raw if raw is not None else '').strip()
+              for fmt in ('%y/%m/%d', '%Y-%m-%d', '%Y/%m/%d', '%Y%m%d', '%y%m%d'):
+                  try:
+                      d = datetime.strptime(s, fmt).date()
+                      if 2020 <= d.year <= 2030:
+                          return d.isoformat()
+                  except ValueError:
+                      pass
+              return None
+
+          def integer(raw, zero_ok=False):
+              s = str(raw if raw is not None else '').replace(',', '').strip()
+              if not re.fullmatch(r'\d{1,15}', s):
+                  return None
+              n = int(s)
+              return n if (n >= 0 if zero_ok else n > 0) else None
+
+          def clean_bars(rows):
+              days, duplicates, invalid = set(), 0, 0
+              for r in rows:
+                  if not isinstance(r, dict):
+                      invalid += 1
+                      continue
+                  d = parse_day(r.get('bsop_date'))
+                  o = integer(r.get('stck_oprc'))
+                  h = integer(r.get('stck_hgpr'))
+                  l = integer(r.get('stck_lwpr'))
+                  c = integer(r.get('stck_clpr'))
+                  v = integer(r.get('acml_vol'), True)
+                  if not d or None in (o, h, l, c, v) or not (0 < l <= o <= h and l <= c <= h):
+                      invalid += 1
+                      continue
+                  if d in days: duplicates += 1
+                  days.add(d)
+              return days, duplicates, invalid
+
+          calendar = xcals.get_calendar('XKRX')
+          base = [d.date().isoformat() for d in calendar.sessions_in_range(
+              pd.Timestamp('2024-01-01'), pd.Timestamp(TARGET))]
+          corrected = [d for d in base if d not in NO_TRADE]
+          assert all(x in base for x in NO_TRADE), 'Library already recognizes one of the holiday exceptions'
+          assert parse_day('26/10/30') == TARGET
+          assert parse_day('26/13/30') is None
+          assert '2026-07-17' not in corrected and '2026-06-03' not in corrected
+          assert corrected[-1] == TARGET
+          # Minimal local unit test for boundary-day handling.
+          artificial = set(corrected[-75:])
+          assert len(artificial) == 75
+          assert '2026-07-17' not in artificial
+          assert sum(x in artificial for x in corrected[-75:]) == 75
+
+          if not os.getenv('NHPLUG_APP_KEY') or not os.getenv('NHPLUG_APP_SECRET'):
+              raise SystemExit('No configured NHPLUG Secrets; credential values are never logged.')
+
+          report = {
+              'schema': 'jongbe-v884-holiday-corrected-chart-readiness-v1',
+              'generated_at_kst': datetime.now(ZoneInfo('Asia/Seoul')).isoformat(timespec='seconds'),
+              'target': TARGET, 'requested_sessions': REQUESTED, 'mode': 'KRX/Y',
+              'official_holiday_exceptions': sorted(NO_TRADE),
+              'calendar_library_misidentified_as_open': sorted(NO_TRADE),
+              'stocks': [], 'site_modified': False, 'orders_used': False,
+              'notes': [
+                  'Verified historical dates, not stock price accuracy or rights to redistribute.',
+                  'No price, key, token, raw response, balance, or account data saved.',
+                  'Unknown missing dates are never filled automatically.'
+              ]
+          }
+          for code, name in NAMES:
+              record = {'code': code, 'name': name, 'returned_rows': 0,
+                        'valid_unique_days': 0, 'duplicate_days': 0, 'invalid_bars': 0,
+                        'first_day': None, 'last_day': None,
+                        'old_calendar_consecutive': 0, 'corrected_calendar_consecutive': 0,
+                        'missing_expected_days': [], 'unexpected_non_session_days': [],
+                        'signals_205_ready': False, 'full_chart_452_ready': False,
+                        'status': 'not_requested'}
+              try:
+                  answer = call('/krstock/quote/v1/currentDaily', {
+                      'market_cd': 'KRX', 'iem_cd': code,
+                      'array_cnt': str(REQUESTED), 'view_main_yn': 'Y'
+                  })
+                  rows = answer.get('Output_0') if isinstance(answer, dict) else None
+                  if isinstance(rows, dict): rows = [rows]
+                  if not isinstance(rows, list): rows = []
+                  days, dup, invalid = clean_bars(rows)
+                  def contiguous(calendar_sessions):
+                      total = 0
+                      for x in reversed(calendar_sessions):
+                          if x not in days: break
+                          total += 1
+                      return total
+                  a, b = contiguous(base), contiguous(corrected)
+                  span = corrected[max(0,len(corrected)-REQUESTED):]
+                  missing = [x for x in span if x not in days]
+                  unexpected = sorted(x for x in days if x >= span[0] and x <= TARGET and x not in set(corrected))
+                  record.update({
+                      'returned_rows': len(rows), 'valid_unique_days': len(days),
+                      'duplicate_days': dup, 'invalid_bars': invalid,
+                      'first_day': min(days) if days else None,
+                      'last_day': max(days) if days else None,
+                      'old_calendar_consecutive': a, 'corrected_calendar_consecutive': b,
+                      'missing_expected_days': missing[:30], 'missing_count_in_last_452': len(missing),
+                      'unexpected_non_session_days': unexpected[:20],
+                      'signals_205_ready': b >= 205,
+                      'full_chart_452_ready': b >= 452,
+                      'status': 'ok' if b >= 452 else 'additional_calendar_or_data_gaps'
+                  })
+              except Exception as exc:
+                  record['status'] = 'query_or_parse_error'
+                  record['error_type'] = type(exc).__name__
+              report['stocks'].append(record)
+              print(f'{name}: raw={record["returned_rows"]}, old_continuous={record["old_calendar_consecutive"]}, '
+                    f'corrected_continuous={record["corrected_calendar_consecutive"]}, '
+                    f'last452_missing={record.get("missing_count_in_last_452")}, '
+                    f'first_missing={record["missing_expected_days"][:8]}, '
+                    f'205_ready={record["signals_205_ready"]}, 452_ready={record["full_chart_452_ready"]}', flush=True)
+              time.sleep(1)
+
+          report['all_two_stocks_452_ready'] = all(x['full_chart_452_ready'] for x in report['stocks'])
+          OUT.write_text(json.dumps(report, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
+          print('SUMMARY '+json.dumps({
+              'corrected_holidays': sorted(NO_TRADE),
+              'success_count': sum(s['full_chart_452_ready'] for s in report['stocks']),
+              'needs_followup': sum(not s['full_chart_452_ready'] for s in report['stocks']),
+              'no_scanner_changes': True
+          }, ensure_ascii=False), flush=True)
+          if not report['all_two_stocks_452_ready']:
+              raise SystemExit('Incomplete 452-day coverage even with known 2026 closures: inspect missing dates in report.')
+          print('PASS: 452-day calendar continuity verified for two stocks. Production use NOT approved.')
+          PY
+      - name: Upload non-sensitive date diagnostic
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: v884-calendar-readiness-${{ github.run_id }}
+          path: v884-calendar-audit.json
+          retention-days: 7
+          if-no-files-found: warn
