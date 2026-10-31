@@ -1,0 +1,105 @@
+name: V8.8.4 Namuh daily response diagnostic (read-only)
+
+on:
+  push:
+    branches: [v8.8.4-test]
+    paths:
+      - '.github/workflows/v884-namuh-schema-check.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      NHPLUG_APP_KEY: ${{ secrets.NAMUH_APP_KEY }}
+      NHPLUG_APP_SECRET: ${{ secrets.NAMUH_APP_SECRET_KEY }}
+      NHPLUG_BASE_URL: https://api.nhplug.com:8443
+      NHPLUG_AUTH_URL: https://api.nhplug.com:8443
+      NHPLUG_RATE_LIMIT: '2'
+    steps:
+      - name: Install NHPLUG
+        run: python -m pip install --disable-pip-version-check nhplug
+      - name: Inspect safe daily bar fields and dates
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          import re
+          import time
+          from datetime import date
+          from pathlib import Path
+          from nhplug import call
+
+          out=Path('v884-namuh-schema-report')
+          out.mkdir(exist_ok=True)
+          TARGET='2026-10-30'
+          report={'schema':'jongbe-namuh-daily-schema-check-v1','target':TARGET,
+                  'note':'Read-only; field names, recent date tokens and daily closing prices only. No credentials/raw response stored.',
+                  'records':[]}
+          if not os.getenv('NHPLUG_APP_KEY') or not os.getenv('NHPLUG_APP_SECRET'):
+              report['setup']='missing_secrets'
+          else:
+              def to_day(raw):
+                  if raw is None: return None
+                  m=re.search(r'(20\d{2})[-./]?(\d{2})[-./]?(\d{2})',str(raw)[:30])
+                  if not m: return None
+                  try: return date(int(m[1]),int(m[2]),int(m[3])).isoformat()
+                  except ValueError: return None
+              def safe_close(raw):
+                  s=str(raw if raw is not None else '').replace(',','').strip()
+                  return int(s) if re.fullmatch(r'\d{1,10}',s) and int(s)>0 else None
+              for code in ('005930','000660'):
+                  for market in ('KRX','UNT'):
+                      for regular_only in ('Y','N'):
+                          item={'code':code,'market':market,'view_main_yn':regular_only,
+                                'status':'not_checked','row_count':0,'possible_date_fields':[],
+                                'recent_days':[],'target_close':None}
+                          try:
+                              response=call('/krstock/quote/v1/currentDaily',{
+                                  'market_cd':market,'iem_cd':code,'array_cnt':'30','view_main_yn':regular_only})
+                              rows=response.get('Output_0') if isinstance(response,dict) else None
+                              if isinstance(rows,dict):rows=[rows]
+                              if not isinstance(rows,list):rows=[]
+                              item['row_count']=len(rows)
+                              date_keys=set();recent=[]
+                              for row in rows[:30]:
+                                  if not isinstance(row,dict):continue
+                                  candidates=[]
+                                  for key,val in row.items():
+                                      if not isinstance(key,str) or len(key)>40:continue
+                                      # Extract only valid dates and names of fields that contained them.
+                                      day=to_day(val) if ('date' in key.lower() or key.lower().endswith('_dt') or key.lower().endswith('dd')) else None
+                                      if day:
+                                          date_keys.add(key)
+                                          candidates.append(day)
+                                  day=next(iter(sorted(set(candidates),reverse=True)),None)
+                                  close=safe_close(row.get('stck_clpr'))
+                                  if day:
+                                      recent.append({'day':day,'close':close})
+                                      if day==TARGET:item['target_close']=close
+                              item['possible_date_fields']=sorted(date_keys)
+                              item['recent_days']=recent[:5]
+                              item['status']='dated_rows_found' if recent else ('rows_without_recognized_date' if rows else 'no_rows')
+                          except Exception as exc:
+                              # Never log exception messages: HTTP auth or response objects might contain secrets.
+                              item['status']='query_error'
+                              item['error_type']=type(exc).__name__
+                          report['records'].append(item)
+                          print(f"{code} {market}/{regular_only}: {item['status']}; rows={item['row_count']}; date_fields={item['possible_date_fields']}; first_days={item['recent_days']}; 10/30={item['target_close']}",flush=True)
+                          time.sleep(.6)
+          (out/'report.json').write_text(json.dumps(report,ensure_ascii=False,indent=2),encoding='utf-8')
+          print('Diagnostic complete; success only means the diagnostics ran. Prices are unverified until market/session is confirmed.')
+          PY
+      - name: Upload sanitized report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: v884-namuh-schema-check-${{ github.run_id }}
+          path: v884-namuh-schema-report/report.json
+          if-no-files-found: warn
+          retention-days: 7
