@@ -1,0 +1,78 @@
+name: V8.8.3 isolated branch checks (no deployment)
+
+on:
+  push:
+    branches:
+      - v8.8.3-test
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out the test branch
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Check source syntax
+        run: |
+          node --check v88/v88-engine.js
+          node --check v88/v88-forecast.js
+          node --check v88/v88-panel.js
+          python -m py_compile v88/collect_market.py v88/collect_reference.py
+      - name: Check module links, safe status, and sample engine result
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          html = Path('index.html').read_text(encoding='utf-8')
+          for name in ('v88/v88-style.css', 'v88/v88-engine.js',
+                       'v88/v88-forecast.js', 'v88/v88-panel.js', 'v88Root'):
+              assert name in html, f'Missing HTML integration: {name}'
+          assert '<nav class="switcher"' in html, 'Original V8.7 tabs missing'
+          workflow = Path('.github/workflows/scanner.yml').read_text(encoding='utf-8')
+          assert 'cp -r v88 site/' in workflow, 'V8.8 files missing from Pages build'
+          expected = {
+              'market-latest.json': 'jongbe-market-snapshot-v1',
+              'market-history.json': 'jongbe-market-history-v1',
+              'corporate-classification.json': 'jongbe-corporate-classification-v1',
+              'investor-flows.json': 'jongbe-investor-flows-v1',
+          }
+          for filename, schema in expected.items():
+              record = json.loads((Path('v88') / filename).read_text(encoding='utf-8'))
+              assert record.get('schema') == schema, f'Wrong schema: {filename}'
+          snapshot = json.loads(Path('v88/market-latest.json').read_text(encoding='utf-8'))
+          if not snapshot.get('complete'):
+              assert not snapshot.get('factors'), 'Incomplete market data has fabricated factors'
+          print('HTML wiring, original tabs, Pages copy, and JSON schema checks passed')
+          PY
+          node <<'NODE'
+          const assert = require('node:assert/strict');
+          const engine = require('./v88/v88-engine.js');
+          const forecast = require('./v88/v88-forecast.js');
+          assert.equal(typeof engine.analyze, 'function');
+          assert.equal(typeof engine.bollinger, 'function');
+          assert.equal(typeof forecast.forecast, 'function');
+          const bars = Array.from({length: 90}, (_, i) => {
+            const date = new Date(Date.UTC(2025,0,1+i)).toISOString().slice(0,10);
+            return [date,100,101,99,100,1000,100,100,100,0];
+          });
+          const result = engine.analyze(bars);
+          assert.equal(result.ready, true);
+          assert.deepEqual(result.signals, []);
+          console.log('V8.8.3 JavaScript smoke checks passed');
+          NODE
+      - name: Mark branch check complete
+        run: echo 'Isolated checks passed. No website deployed and no trading API or credentials used.'
