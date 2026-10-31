@@ -1,0 +1,6 @@
+{
+  "schema": "jongbe-investor-flows-v1",
+  "session_date": null,
+  "notice": "실제 외국인·기관 순매수 데이터가 없으면 신호를 표시하지 않습니다.",
+  "entries": {}
+}
