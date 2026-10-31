@@ -42,6 +42,7 @@ jobs:
           mkdir -p site
           cp index.html results.json site/
           cp -r charts site/
+          cp -r v88 site/
           touch site/.nojekyll
       - name: Configure Pages
         uses: actions/configure-pages@v5
