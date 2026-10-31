@@ -1,0 +1,155 @@
+name: V8.8.4 Namuh daily close session comparison (read-only)
+
+on:
+  push:
+    branches: [v8.8.4-test]
+    paths:
+      - '.github/workflows/v884-namuh-daily-2stocks.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  namuh-daily:
+    name: Compare KRX and unified daily quotes (2 stocks)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      NHPLUG_APP_KEY: ${{ secrets.NAMUH_APP_KEY }}
+      NHPLUG_APP_SECRET: ${{ secrets.NAMUH_APP_SECRET_KEY }}
+      NHPLUG_BASE_URL: https://api.nhplug.com:8443
+      NHPLUG_AUTH_URL: https://api.nhplug.com:8443
+      NHPLUG_RATE_LIMIT: '2'
+    steps:
+      - name: Install official NHPLUG SDK
+        run: python -m pip install --disable-pip-version-check 'nhplug'
+
+      - name: Read only daily quotes for October 30
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          import re
+          import time
+          from datetime import datetime
+          from pathlib import Path
+          from zoneinfo import ZoneInfo
+
+          TARGET = '2026-10-30'
+          PREVIOUS = '2026-10-29'
+          STOCKS = [('005930', '삼성전자'), ('000660', 'SK하이닉스')]
+          MODES = [('KRX', 'Y'), ('KRX', 'N'), ('UNT', 'Y'), ('UNT', 'N')]
+          OUTPUT = Path('v884-namuh-daily')
+          OUTPUT.mkdir(exist_ok=True)
+          report = {
+              'schema': 'jongbe-v884-namuh-daily-2stocks-v1',
+              'generated_at_kst': datetime.now(ZoneInfo('Asia/Seoul')).isoformat(timespec='seconds'),
+              'target_date': TARGET,
+              'query_api': '/krstock/quote/v1/currentDaily',
+              'mode_definitions': {'market_cd': 'KRX=한국거래소, UNT=통합',
+                                   'view_main_yn': 'Y=정규장만, N=전체장'},
+              'stocks': [],
+              'notes': ['시세 일봉 데이터 조회만 수행합니다. 주문/계좌조회 없음.',
+                        '서버 응답 시세에 거래세션 표기와 실제 데이터가 일치하는지 추가 검증이 필요합니다.',
+                        '인증키, 접근토큰, 응답 원문을 저장하거나 출력하지 않습니다.']
+          }
+
+          def datefmt(value):
+              digits = re.sub(r'[^0-9]', '', str(value or ''))
+              if len(digits) != 8:
+                  return None
+              try:
+                  return datetime.strptime(digits, '%Y%m%d').strftime('%Y-%m-%d')
+              except ValueError:
+                  return None
+
+          def numeric(value):
+              if value is None or isinstance(value, bool):
+                  return None
+              txt = str(value).strip().replace(',', '')
+              if not re.fullmatch(r'-?\d+(?:\.\d+)?', txt):
+                  return None
+              try:
+                  return int(float(txt))
+              except (ValueError, OverflowError):
+                  return None
+
+          if not os.getenv('NHPLUG_APP_KEY') or not os.getenv('NHPLUG_APP_SECRET'):
+              report['setup_error'] = 'GitHub Secrets 미설정'
+              (OUTPUT / 'report.json').write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding='utf-8')
+              raise SystemExit('FAIL: GitHub Secrets 미설정. 비밀값을 로그에 출력하지 않습니다.')
+
+          from nhplug import call
+          success = 0
+          for code, name in STOCKS:
+              item = {'code': code, 'name': name, 'quotes': []}
+              for market_cd, view_main_yn in MODES:
+                  record = {'market_cd': market_cd, 'view_main_yn': view_main_yn,
+                            'matched_dates': [], 'row_count': 0, 'status': 'unavailable'}
+                  try:
+                      res = call('/krstock/quote/v1/currentDaily', {
+                          'market_cd': market_cd,
+                          'iem_cd': code,
+                          'array_cnt': '12',
+                          'view_main_yn': view_main_yn,
+                      })
+                      rows = res.get('Output_0') if isinstance(res, dict) else None
+                      if isinstance(rows, dict):
+                          rows = [rows]
+                      if not isinstance(rows, list) or not rows:
+                          raise ValueError('daily rows absent')
+                      record['row_count'] = len(rows)
+                      for row in rows:
+                          if not isinstance(row, dict):
+                              continue
+                          day = datefmt(row.get('bsop_date'))
+                          if day not in (TARGET, PREVIOUS):
+                              continue
+                          close = numeric(row.get('stck_clpr'))
+                          bar = {'date': day, 'close': close}
+                          for field, label in [('stck_oprc', 'open'), ('stck_hgpr', 'high'),
+                                               ('stck_lwpr', 'low'), ('acml_vol', 'volume')]:
+                              bar[label] = numeric(row.get(field))
+                          if close is not None and close > 0:
+                              record['matched_dates'].append(bar)
+                      if record['matched_dates']:
+                          record['status'] = 'ok'
+                          success += 1
+                      else:
+                          record['status'] = 'no_target_dates'
+                  except Exception as exc:
+                      # Intentionally suppress exception text: credentials/headers/raw responses could leak.
+                      record['status'] = 'query_failed'
+                      record['error_type'] = type(exc).__name__
+                  item['quotes'].append(record)
+                  ref = next((q['close'] for q in record['matched_dates'] if q['date'] == TARGET), None)
+                  print(f'{name} {code} {market_cd}/{view_main_yn}: {record["status"]} '
+                        f'10/30 close={ref if ref is not None else "미확인"}', flush=True)
+                  time.sleep(0.6)
+              report['stocks'].append(item)
+
+          report['successful_query_variants'] = success
+          report['all_modes_verified'] = success == len(STOCKS) * len(MODES)
+          (OUTPUT / 'report.json').write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding='utf-8')
+          print('SUMMARY query variants with dated daily bars:', success, '/', len(STOCKS)*len(MODES))
+          # At least KRX regular daily bars for both stocks are required to declare the probe passed.
+          krx_regular_ok = all(
+              any(q['market_cd'] == 'KRX' and q['view_main_yn'] == 'Y' and
+                  any(b['date'] == TARGET and b['close'] and b['close'] > 0 for b in q['matched_dates'])
+                  for q in stock['quotes']) for stock in report['stocks']
+          )
+          if not krx_regular_ok:
+              raise SystemExit('FAIL: KRX Y 10/30 종가를 두 종목 모두 확보하지 못했습니다. 보고서 참고.')
+          print('PASS: 두 종목 10/30 KRX 정규장 일봉 확보. NXT/통합 종가 차이는 따로 검증 필요.')
+          PY
+
+      - name: Upload sanitized diagnostic results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: v884-namuh-daily-2stocks-${{ github.run_id }}
+          path: v884-namuh-daily/report.json
+          if-no-files-found: warn
+          retention-days: 7
