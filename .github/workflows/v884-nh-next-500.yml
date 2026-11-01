@@ -1,0 +1,183 @@
+name: V8.8.4 next 500 NH indicator audit (read-only)
+
+on:
+  push:
+    branches: [v8.8.4-test]
+    paths:
+      - '.github/workflows/v884-nh-next-500.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: jongbe-v884-next-500-readonly
+  cancel-in-progress: false
+
+jobs:
+  validate-500:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    env:
+      NHPLUG_APP_KEY: ${{ secrets.NAMUH_APP_KEY }}
+      NHPLUG_APP_SECRET: ${{ secrets.NAMUH_APP_SECRET_KEY }}
+      NHPLUG_BASE_URL: https://api.nhplug.com:8443
+      NHPLUG_AUTH_URL: https://api.nhplug.com:8443
+      NHPLUG_RATE_LIMIT: '2'
+    steps:
+      - name: Checkout V8.8.4 test branch
+        uses: actions/checkout@v4
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Set up Node.js 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Install the same read-only clients as the verified 200-stock test
+        run: python -m pip install --disable-pip-version-check 'nhplug==0.4.1' 'exchange-calendars>=4.9,<5' pandas pyyaml
+      - name: Reuse proven batch analyzer for five serial 100-stock partitions
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          """Read-only staged test; reuses the already proven 100-stock script.
+
+          Each batch keeps NH licensed OHLCV ephemeral. Only aggregate counts and
+          public stock codes of unready cases can be saved; no prices/order APIs.
+          """
+          from collections import Counter
+          from pathlib import Path
+          import json
+          import os
+          import re
+          import subprocess
+          import yaml
+
+          WORKFLOW = Path('.github/workflows/v884-market-stage.yml')
+          RESULT = Path('v884-nh-100-aggregate.json')
+          PRIVATE = Path('private-nh-bars.json')
+          OUTDIR = Path('v884-five-part-results')
+          OUTDIR.mkdir(exist_ok=True)
+          if not WORKFLOW.exists():
+              raise RuntimeError('Verified staged workflow is missing')
+          source = yaml.safe_load(WORKFLOW.read_text(encoding='utf-8'))
+          steps = source['jobs']['analyze']['steps']
+          scripts = [s.get('run', '') for s in steps
+                     if s.get('name') == 'Analyze private NH regular-session bars using existing engine']
+          if len(scripts) != 1:
+              raise RuntimeError('Verified batch script not uniquely found')
+          script = scripts[0]
+          for token in ('BATCH_SIZE = 100', 'ASOF = \'2026-10-30\'',
+                        'node /tmp/v884_stage_engine.js', 'private-nh-bars.json'):
+              if token not in script:
+                  raise RuntimeError('Verified batch contract changed; refusing to run')
+
+          # Collect only public instrument codes for historical-data gaps, never
+          # quotes, holdings, auth headers, or account-related information.
+          def insert_after(original, match, lines):
+              pattern = r'(?m)^([ ]*)(' + re.escape(match) + r')[ \t]*$'
+              found = list(re.finditer(pattern, original))
+              if len(found) != 1:
+                  raise RuntimeError('Batch source changed at '+match)
+              m = found[0]
+              indent = m.group(1)
+              addition = ''.join('\n'+indent+s for s in lines)
+              return original[:m.end()] + addition + original[m.end():]
+
+          # A failed stock's code is public, but no NH quote or daily bar is logged.
+          script = insert_after(script, 'counters = collections.Counter()',
+                                ['missing_stocks = []'])
+          script = insert_after(script, 'counters[state] += 1',
+                                ["if state != 'ok':", "    missing_stocks.append({'code': code, 'reason': state})"])
+          contract = "'not_ready_reasons': {k:v for k,v in sorted(counters.items()) if k != 'ok'},"
+          script = insert_after(script, contract, ["'missing_stock_codes': missing_stocks,"])
+
+          results = []
+          try:
+              for idx in range(5):
+                  if PRIVATE.exists():
+                      PRIVATE.unlink()
+                  if RESULT.exists():
+                      RESULT.unlink()
+                  env = os.environ.copy()
+                  env['BATCH_INDEX'] = str(idx)
+                  print(f'=== BEGIN KRX regular historical batch {idx}/4 ===', flush=True)
+                  subprocess.run(['bash', '-c', script], check=True, env=env, timeout=480)
+                  if not RESULT.exists():
+                      raise RuntimeError(f'Batch {idx} did not produce aggregate')
+                  data = json.loads(RESULT.read_text(encoding='utf-8'))
+                  if (data.get('schema') != 'jongbe-v884-nh-100-batch-v1'
+                          or data.get('batch_index') != idx
+                          or data.get('asof') != '2026-10-30'
+                          or data.get('batch_stock_count') != 100
+                          or data.get('total_universe') != 2497
+                          or data.get('batch_test_passed') is not True
+                          or data.get('account_or_orders_used') is not False
+                          or data.get('published_site_changed') is not False):
+                      raise RuntimeError(f'Batch {idx}: aggregate safety or coverage failure')
+                  # Never upload the licensed OHLCV file as an artifact.
+                  PRIVATE.unlink(missing_ok=True)
+                  (OUTDIR / f'batch-{idx}.json').write_text(
+                      json.dumps(data, ensure_ascii=False, indent=2)+'\n',encoding='utf-8')
+                  results.append(data)
+                  print(f'=== END batch {idx}/4, valid {data["nh_regular_history_ready"]}/100 ===',flush=True)
+          finally:
+              PRIVATE.unlink(missing_ok=True)
+
+          if [r['batch_index'] for r in results] != [0, 1, 2, 3, 4]:
+              raise RuntimeError('Incomplete 500-stock batch coverage')
+          signals = Counter()
+          risks = Counter()
+          reasons = Counter()
+          errors = Counter()
+          missing = []
+          for item in results:
+              signals.update(item.get('signal_counts') or {})
+              risks.update(item.get('risk_counts') or {})
+              reasons.update(item.get('not_ready_reasons') or {})
+              errors.update(item.get('engine_errors') or {})
+              missing.extend(item.get('missing_stock_codes') or [])
+          total = sum(x['batch_stock_count'] for x in results)
+          valid = sum(x['nh_regular_history_ready'] for x in results)
+          analyzed = sum(x['analyzed_with_original_engine'] for x in results)
+          assert total == 500 and analyzed == valid and not errors
+          assert len(missing) == total-valid
+          summary = {
+              'schema': 'jongbe-v884-next-500-private-audit-v1',
+              'asof': '2026-10-30',
+              'universe_asof': '2026-10-29',
+              'data_source': 'NH PLUG KRX regular; results are diagnostic only',
+              'total_universe': 2497,
+              'selected_batches': [0, 1, 2, 3, 4],
+              'stocks_attempted': total,
+              'complete_history': valid,
+              'engine_analyzed': analyzed,
+              'incomplete_history': total-valid,
+              'incomplete_stock_codes': missing,
+              'incomplete_reasons': dict(reasons),
+              'signal_counts': dict(signals),
+              'risk_counts': dict(risks),
+              'engine_errors': dict(errors),
+              'public_website_modified': False,
+              'bulk_quotes_published': False,
+              'orders_or_account_accessed': False,
+              'coverage': 'first five 100-stock partitions, NOT full 2497',
+              'notice': 'No buy recommendations; 452 historical sessions required for indicators. Review NH data redistribution permissions before publishing anything.'
+          }
+          (OUTDIR/'summary-500.json').write_text(
+              json.dumps(summary,ensure_ascii=False,indent=2)+'\n',encoding='utf-8')
+          print('SUMMARY '+json.dumps(summary,ensure_ascii=False), flush=True)
+          print('PASS: five sequential batches aggregated; test branch and live website unchanged', flush=True)
+          PY
+      - name: Always remove private data
+        if: always()
+        run: rm -f private-nh-bars.json
+      - name: Upload aggregate report only - no NH quotes
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: v884-next-500-summary-${{ github.run_id }}
+          path: v884-five-part-results/
+          if-no-files-found: warn
+          retention-days: 7
