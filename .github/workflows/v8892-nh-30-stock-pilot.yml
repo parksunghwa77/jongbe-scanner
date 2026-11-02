@@ -1,0 +1,209 @@
+name: Jongbe V8.8.9.2 NH 30-stock close and history pilot (read-only)
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [v8.8.4-test]
+    paths:
+      - '.github/workflows/v8892-nh-30-stock-pilot.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: jongbe-nh-30-stock-readonly-pilot
+  cancel-in-progress: false
+
+jobs:
+  pilot-30:
+    name: Audit latest completed KRX bars for 30 stocks
+    runs-on: ubuntu-latest
+    timeout-minutes: 22
+    env:
+      NHPLUG_APP_KEY: ${{ secrets.NAMUH_APP_KEY }}
+      NHPLUG_APP_SECRET: ${{ secrets.NAMUH_APP_SECRET_KEY }}
+      NHPLUG_BASE_URL: https://api.nhplug.com:8443
+      NHPLUG_AUTH_URL: https://api.nhplug.com:8443
+      NHPLUG_RATE_LIMIT: '2'
+    steps:
+      - name: Checkout isolated test branch
+        uses: actions/checkout@v4
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install read-only NH client and session calendar
+        run: python -m pip install --disable-pip-version-check 'nhplug==0.4.1' 'exchange-calendars>=4.9,<5' pandas
+      - name: Audit 30 daily-bar streams without publishing quote values
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p nh-30-audit
+          python - <<'PY'
+          """Private NH daily history quality pilot; export dates and counts ONLY.
+
+          No trading/account requests, no credentials in logs, and no licensed
+          OHLCV market data or derived quote values in uploaded artifacts.
+          """
+          from collections import Counter
+          from datetime import date, datetime, timedelta, time as daytime
+          from pathlib import Path
+          from zoneinfo import ZoneInfo
+          import json
+          import os
+          import re
+          import time
+
+          import exchange_calendars as ec
+          import pandas as pd
+          from nhplug import call
+
+          UNIVERSE_PATH = Path('results.json')
+          OUT = Path('nh-30-audit/summary.json')
+          NOW = datetime.now(ZoneInfo('Asia/Seoul'))
+          FINISHED = NOW.date() if NOW.time() >= daytime(16, 30) else NOW.date() - timedelta(days=1)
+          # Exchange calendar occasionally omits exceptional Korean closures.
+          KNOWN_CLOSED = {'2026-06-03', '2026-07-17'}
+          sessions = ec.get_calendar('XKRX').sessions_in_range(
+              pd.Timestamp(FINISHED - timedelta(days=60)), pd.Timestamp(FINISHED))
+          eligible = [x.date().isoformat() for x in sessions
+                      if x.date().isoformat() not in KNOWN_CLOSED]
+          if not eligible:
+              raise RuntimeError('Unable to find last completed KRX session')
+          EXPECTED = eligible[-1]
+          if not os.getenv('NHPLUG_APP_KEY') or not os.getenv('NHPLUG_APP_SECRET'):
+              raise RuntimeError('GitHub Secrets are missing (no secret value printed)')
+
+          # Use the existing public-stock universe; include the 3 already tested.
+          universe = json.loads(UNIVERSE_PATH.read_text(encoding='utf-8'))
+          pools = {'KOSPI': set(), 'KOSDAQ': set()}
+          for row in universe.get('rows', []):
+              code = str(row.get('code', ''))
+              market = row.get('market')
+              if market in pools and re.fullmatch(r'\d{6}', code):
+                  pools[market].add(code)
+          if sum(map(len, pools.values())) < 2000:
+              raise RuntimeError('Test stock universe is missing/incomplete')
+
+          anchors = [('005930','삼성전자'),('000660','SK하이닉스'),('328130','루닛')]
+          already = {code for code, _ in anchors}
+          def evenly_spaced(market, wanted):
+              options = sorted(pools[market] - already)
+              if len(options) < wanted:
+                  raise RuntimeError('Not enough public codes for sampling')
+              return [(options[i * (len(options)-1) // (wanted-1)], market)
+                      for i in range(wanted)]
+          selected = anchors + evenly_spaced('KOSPI', 14) + evenly_spaced('KOSDAQ', 13)
+          if len(selected) != 30 or len({c for c,_ in selected}) != 30:
+              raise RuntimeError('Invalid pilot sample: expected 30 distinct codes')
+
+          def dayparse(value):
+              if value is None: return None
+              s = str(value).strip()
+              for fmt in ('%y/%m/%d', '%Y-%m-%d', '%Y%m%d', '%Y/%m/%d', '%y%m%d'):
+                  try:
+                      d = datetime.strptime(s, fmt).date()
+                      if date(2020,1,1) <= d <= date(2032,12,31):
+                          return d.isoformat()
+                  except ValueError:
+                      pass
+              return None
+
+          def number(value, strictly_positive=False):
+              if value is None or isinstance(value, bool): return None
+              raw = str(value).strip().replace(',', '')
+              if not re.fullmatch(r'\d{1,15}(?:\.\d{1,4})?', raw): return None
+              try:
+                  value = float(raw)
+                  return value if value > 0 or (not strictly_positive and value >= 0) else None
+              except (OverflowError, ValueError):
+                  return None
+
+          report = {
+              'schema': 'jongbe-v8892-30-stock-private-diagnostic-v1',
+              'checked_at_kst': NOW.isoformat(timespec='seconds'),
+              'expected_last_completed_krx_date': EXPECTED,
+              'universe_asof': universe.get('asof'),
+              'sample_method': '3 regression stocks + 14 spaced KOSPI + 13 spaced KOSDAQ',
+              'source': 'NHPLUG /krstock/quote/v1/currentDaily, KRX regular only',
+              'includes_licensed_prices_or_volumes': False,
+              'uses_orders_or_accounts': False,
+              'website_published_or_changed': False,
+              'stocks': []
+          }
+          counts = Counter()
+          for index, (code, label) in enumerate(selected, 1):
+              item = {'code': code, 'label': label, 'status': 'unavailable',
+                      'latest_valid_date': None, 'valid_history_days': 0,
+                      'fresh_for_expected_session': False,
+                      'ready_for_200_day_line': False}
+              try:
+                  response = call('/krstock/quote/v1/currentDaily', {
+                      'market_cd': 'KRX', 'iem_cd': code,
+                      'array_cnt': '452', 'view_main_yn': 'Y'})
+                  raw_bars = response.get('Output_0') if isinstance(response, dict) else None
+                  if isinstance(raw_bars, dict): raw_bars = [raw_bars]
+                  if not isinstance(raw_bars, list):
+                      item['status'] = 'missing_rows'
+                  else:
+                      valid_days = set()
+                      for b in raw_bars:
+                          if not isinstance(b, dict): continue
+                          d = dayparse(b.get('bsop_date'))
+                          o = number(b.get('stck_oprc'), True)
+                          h = number(b.get('stck_hgpr'), True)
+                          l = number(b.get('stck_lwpr'), True)
+                          c = number(b.get('stck_clpr'), True)
+                          v = number(b.get('acml_vol'))
+                          if (not d or d > EXPECTED or None in (o,h,l,c,v)
+                                  or l > min(o,c) or h < max(o,c) or h < l):
+                              continue
+                          valid_days.add(d)
+                      if valid_days:
+                          item['latest_valid_date'] = max(valid_days)
+                          item['valid_history_days'] = len(valid_days)
+                          item['fresh_for_expected_session'] = max(valid_days) == EXPECTED
+                          item['ready_for_200_day_line'] = len(valid_days) >= 200
+                          item['status'] = 'ok' if item['fresh_for_expected_session'] else 'stale'
+                      else:
+                          item['status'] = 'no_valid_ohlcv'
+              except Exception:
+                  # Provider exceptions may include authentication data: log no text.
+                  item['status'] = 'request_failed'
+              report['stocks'].append(item)
+              counts[item['status']] += 1
+              print(f'{index:02d}/30 code={code} market={label if index>3 else "regression"} '
+                    f'date={item["latest_valid_date"]} history={item["valid_history_days"]} '
+                    f'status={item["status"]}', flush=True)
+              time.sleep(0.65)  # Serial, intentionally avoids API bursts.
+
+          fresh = sum(v['fresh_for_expected_session'] for v in report['stocks'])
+          hist = sum(v['ready_for_200_day_line'] for v in report['stocks'])
+          report['total_requested'] = 30
+          report['fresh_date_count'] = fresh
+          report['history_200_plus_count'] = hist
+          report['status_counts'] = dict(sorted(counts.items()))
+          OUT.write_text(json.dumps(report, ensure_ascii=False, indent=2)+'\n', encoding='utf-8')
+          summary = (f'### 종베 나무증권 30종목 확대 검증 (날짜/개수만)\n'
+                     f'- 검사 시각: {NOW:%Y-%m-%d %H:%M} KST\n'
+                     f'- 최근 확정 거래일 추정: {EXPECTED}\n'
+                     f'- 날짜 일치: **{fresh}/30**\n'
+                     f'- 유효 일봉 200일 이상: **{hist}/30**\n'
+                     f'- 개인정보·API 키·OHLCV 금액은 보고서에 포함되지 않음\n'
+                     f'- 서버 자동 게시·매매 실행 없음; 데이터 라이선스 검토 필요\n')
+          print(summary, flush=True)
+          if os.getenv('GITHUB_STEP_SUMMARY'):
+              with open(os.environ['GITHUB_STEP_SUMMARY'], 'a', encoding='utf-8') as f:
+                  f.write(summary)
+          if fresh < 27 or hist < 25:
+              raise SystemExit(f'PILOT NEEDS REVIEW: fresh={fresh}/30, history200={hist}/30')
+          print('PILOT PASSED: 30 symbols audited; see exact coverage numbers above')
+          PY
+      - name: Upload safe date-and-count summary only
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: jongbe-v8892-nh-30-private-audit-${{ github.run_id }}
+          path: nh-30-audit/summary.json
+          if-no-files-found: warn
+          retention-days: 7
