@@ -1,0 +1,161 @@
+name: Jongbe V8.8.9.1 NH latest close check - read only
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [v8.8.4-test]
+    paths:
+      - '.github/workflows/v8891-nh-close-check.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: jongbe-v8891-nh-quote-date-check
+  cancel-in-progress: false
+
+jobs:
+  freshness-check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      NHPLUG_APP_KEY: ${{ secrets.NAMUH_APP_KEY }}
+      NHPLUG_APP_SECRET: ${{ secrets.NAMUH_APP_SECRET_KEY }}
+      NHPLUG_BASE_URL: https://api.nhplug.com:8443
+      NHPLUG_AUTH_URL: https://api.nhplug.com:8443
+      NHPLUG_RATE_LIMIT: '2'
+    steps:
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install NHPLUG read-only client and market calendar
+        run: python -m pip install --disable-pip-version-check 'nhplug==0.4.1' 'exchange-calendars>=4.9,<5' pandas
+      - name: Check 3 regular-session daily-bar dates without sharing market prices
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p nh-date-audit
+          python - <<'PY'
+          """Validate NHPLUG KRX regular-session daily dates without persisting quotes.
+
+          No account or order APIs. No provider OHLCV is logged or uploaded.
+          GitHub job logs only public stock identifiers and trading dates.
+          """
+          from datetime import date, datetime, timedelta, time as daytime
+          from pathlib import Path
+          from zoneinfo import ZoneInfo
+          import json
+          import os
+          import re
+          import time
+
+          import exchange_calendars as ec
+          import pandas as pd
+
+          STOCKS = [('005930', '삼성전자'), ('000660', 'SK하이닉스'), ('328130', '루닛')]
+          # Some exceptional Korean closures may not be in installed calendar versions.
+          OVERRIDE_CLOSED = {'2026-06-03', '2026-07-17'}
+          NOW = datetime.now(ZoneInfo('Asia/Seoul'))
+          last_finished_date = NOW.date() if NOW.time() >= daytime(16, 30) else NOW.date() - timedelta(days=1)
+          sessions = ec.get_calendar('XKRX').sessions_in_range(
+              pd.Timestamp(last_finished_date - timedelta(days=50)),
+              pd.Timestamp(last_finished_date)
+          )
+          eligible = [x.date().isoformat() for x in sessions if x.date().isoformat() not in OVERRIDE_CLOSED]
+          if not eligible:
+              raise RuntimeError('No eligible exchange dates found; check calendar package')
+          EXPECTED = eligible[-1]
+          report = {
+              'schema': 'jongbe-v8891-regular-daily-date-only-v1',
+              'checked_at_kst': NOW.isoformat(timespec='seconds'),
+              'expected_last_completed_session_estimate': EXPECTED,
+              'market': 'KRX regular session',
+              'source_api': '/krstock/quote/v1/currentDaily',
+              'note': 'Calendar is an estimate; verify unexpected exchange holidays.',
+              'includes_prices_or_volume': False,
+              'uses_accounts_or_orders': False,
+              'stocks': [],
+          }
+
+          def parse_day(value):
+              if value is None: return None
+              value = str(value).strip()
+              for f in ('%y/%m/%d', '%Y-%m-%d', '%Y%m%d', '%Y/%m/%d', '%y%m%d'):
+                  try:
+                      parsed = datetime.strptime(value, f).date()
+                      if date(2020, 1, 1) <= parsed <= date(2032, 12, 31):
+                          return parsed.isoformat()
+                  except ValueError:
+                      pass
+              return None
+
+          def close_present(value):
+              if value is None or isinstance(value, bool): return False
+              raw = str(value).strip().replace(',', '')
+              if not re.fullmatch(r'\d{1,15}(?:\.\d{1,4})?', raw): return False
+              try: return float(raw) > 0
+              except (ValueError, OverflowError): return False
+
+          if not os.environ.get('NHPLUG_APP_KEY') or not os.environ.get('NHPLUG_APP_SECRET'):
+              raise RuntimeError('Missing NHPLUG GitHub Actions secrets; no secret values will be shown')
+          from nhplug import call
+          for code, name in STOCKS:
+              record = {'code': code, 'name': name, 'status': 'unavailable',
+                        'newest_daily_date': None, 'matches_expected_session': False}
+              try:
+                  response = call('/krstock/quote/v1/currentDaily', {
+                      'market_cd': 'KRX', 'iem_cd': code, 'array_cnt': '12',
+                      'view_main_yn': 'Y'
+                  })
+                  bars = response.get('Output_0') if isinstance(response, dict) else None
+                  if isinstance(bars, dict): bars = [bars]
+                  if not isinstance(bars, list):
+                      record['status'] = 'missing_output_rows'
+                  else:
+                      dates = sorted({parsed for bar in bars if isinstance(bar, dict)
+                          if (parsed := parse_day(bar.get('bsop_date')))
+                          and parsed <= NOW.date().isoformat()
+                          and close_present(bar.get('stck_clpr'))})
+                      if dates:
+                          record['newest_daily_date'] = dates[-1]
+                          record['matches_expected_session'] = dates[-1] == EXPECTED
+                          record['status'] = 'ok' if dates[-1] == EXPECTED else 'date_mismatch'
+                      else:
+                          record['status'] = 'no_valid_daily_dates'
+              except Exception:
+                  # Avoid printing SDK error bodies; they could contain provider headers.
+                  record['status'] = 'request_failed'
+              report['stocks'].append(record)
+              print(f'{name}({code}): latest day={record["newest_daily_date"]}, '
+                    f'expected={EXPECTED}, status={record["status"]}', flush=True)
+              time.sleep(0.6)
+
+          report['queried'] = len(STOCKS)
+          report['dates_available'] = sum(s['newest_daily_date'] is not None for s in report['stocks'])
+          report['dates_match_expected'] = sum(s['matches_expected_session'] for s in report['stocks'])
+          Path('nh-date-audit/summary.json').write_text(
+              json.dumps(report, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
+          summary = (f'### 종베 나무증권 정규장 일봉 날짜 점검\n'
+                     f'- 검사 시각: {NOW:%Y-%m-%d %H:%M} KST\n'
+                     f'- 최근 확정 거래일 추정: {EXPECTED}\n'
+                     f'- 유효 날짜 수신: {report["dates_available"]}/{len(STOCKS)}\n'
+                     f'- 기준일 일치: {report["dates_match_expected"]}/{len(STOCKS)}\n'
+                     f'- 시세 금액·거래량·API 비밀값은 보고서에 포함하지 않음\n'
+                     f'- 주의: 이것은 날짜 점검이며 전체시장 수집이나 공개 웹 자동 반영이 아닙니다.\n')
+          print(summary, flush=True)
+          step_summary = os.environ.get('GITHUB_STEP_SUMMARY')
+          if step_summary:
+              with open(step_summary, 'a', encoding='utf-8') as f:
+                  f.write(summary)
+          if report['dates_available'] != len(STOCKS):
+              raise SystemExit('Some symbols have no valid dated bars; see sanitized audit artifact')
+          PY
+      - name: Upload sanitized DATE-only report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: v8891-nh-date-only-${{ github.run_id }}
+          path: nh-date-audit/summary.json
+          if-no-files-found: warn
+          retention-days: 7
