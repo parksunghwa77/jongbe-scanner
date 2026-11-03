@@ -1,0 +1,189 @@
+name: Jongbe V8.8.9.3 NH 100-stock close and history pilot (read-only)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: jongbe-nh-100-stock-readonly-pilot
+  cancel-in-progress: false
+
+jobs:
+  pilot-100:
+    name: Audit last completed KRX bars for 100 stocks
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      NHPLUG_APP_KEY: ${{ secrets.NAMUH_APP_KEY }}
+      NHPLUG_APP_SECRET: ${{ secrets.NAMUH_APP_SECRET_KEY }}
+      NHPLUG_BASE_URL: https://api.nhplug.com:8443
+      NHPLUG_AUTH_URL: https://api.nhplug.com:8443
+      NHPLUG_RATE_LIMIT: '2'
+    steps:
+      - name: Checkout isolated test branch
+        uses: actions/checkout@v4
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install NH client and KRX calendar
+        run: python -m pip install --disable-pip-version-check 'nhplug==0.4.1' 'exchange-calendars>=4.9,<5' pandas
+      - name: Audit 100 stocks without exporting price or volume data
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p nh-100-audit
+          python - <<'PY'
+          from collections import Counter
+          from datetime import date, datetime, timedelta, time as daytime
+          from pathlib import Path
+          from zoneinfo import ZoneInfo
+          import json, os, re, time
+          import exchange_calendars as ec
+          import pandas as pd
+          from nhplug import call
+
+          NOW = datetime.now(ZoneInfo('Asia/Seoul'))
+          finished = NOW.date() if NOW.time() >= daytime(16, 30) else NOW.date() - timedelta(days=1)
+          sessions = ec.get_calendar('XKRX').sessions_in_range(
+              pd.Timestamp(finished - timedelta(days=60)), pd.Timestamp(finished))
+          known_closed = {'2026-06-03', '2026-07-17'}
+          eligible = [x.date().isoformat() for x in sessions
+                      if x.date().isoformat() not in known_closed]
+          if not eligible:
+              raise RuntimeError('No completed KRX session')
+          expected = eligible[-1]
+          if not os.getenv('NHPLUG_APP_KEY') or not os.getenv('NHPLUG_APP_SECRET'):
+              raise RuntimeError('Missing configured secrets')
+          universe = json.loads(Path('results.json').read_text(encoding='utf-8'))
+          pools = {'KOSPI': set(), 'KOSDAQ': set()}
+          for row in universe.get('rows', []):
+              code = str(row.get('code', ''))
+              market = row.get('market')
+              if market in pools and re.fullmatch(r'\d{6}', code):
+                  pools[market].add(code)
+          if sum(map(len, pools.values())) < 2000:
+              raise RuntimeError('Incomplete public stock universe')
+          anchors = [('005930', '삼성전자'), ('000660', 'SK하이닉스'), ('328130', '루닛')]
+          excluded = {code for code, _ in anchors}
+          def spread(market, n):
+              options = sorted(pools[market] - excluded)
+              if len(options) < n:
+                  raise RuntimeError('Insufficient codes')
+              return [(options[i * (len(options) - 1) // (n - 1)], market)
+                      for i in range(n)]
+          selected = anchors + spread('KOSPI', 49) + spread('KOSDAQ', 48)
+          assert len(selected) == 100 and len({c for c, _ in selected}) == 100
+
+          def parse_day(value):
+              if value is None:
+                  return None
+              for fmt in ('%y/%m/%d', '%Y-%m-%d', '%Y%m%d', '%Y/%m/%d', '%y%m%d'):
+                  try:
+                      d = datetime.strptime(str(value).strip(), fmt).date()
+                      if date(2020, 1, 1) <= d <= date(2032, 12, 31):
+                          return d.isoformat()
+                  except ValueError:
+                      pass
+              return None
+          def parse_number(value, positive=False):
+              if value is None or isinstance(value, bool):
+                  return None
+              raw = str(value).strip().replace(',', '')
+              if not re.fullmatch(r'\d{1,15}(?:\.\d{1,4})?', raw):
+                  return None
+              value = float(raw)
+              return value if (value > 0 if positive else value >= 0) else None
+
+          report = {
+              'schema': 'jongbe-v8893-100-stock-diagnostic-v1',
+              'checked_at_kst': NOW.isoformat(timespec='seconds'),
+              'expected_last_completed_krx_date': expected,
+              'sample_method': '3 regression + 49 KOSPI + 48 KOSDAQ',
+              'source': 'NHPLUG /krstock/quote/v1/currentDaily (KRX)',
+              'includes_licensed_prices_or_volumes': False,
+              'uses_orders_or_accounts': False,
+              'website_published_or_changed': False,
+              'stocks': []
+          }
+          counts = Counter()
+          for i, (code, label) in enumerate(selected, 1):
+              item = {'code': code, 'label': label, 'status': 'unavailable',
+                      'latest_valid_date': None, 'valid_history_days': 0,
+                      'fresh_for_expected_session': False, 'ready_for_200_day_line': False}
+              for attempt in range(2):
+                  try:
+                      response = call('/krstock/quote/v1/currentDaily', {
+                          'market_cd': 'KRX', 'iem_cd': code,
+                          'array_cnt': '452', 'view_main_yn': 'Y'})
+                      rows = response.get('Output_0') if isinstance(response, dict) else None
+                      if isinstance(rows, dict):
+                          rows = [rows]
+                      if not isinstance(rows, list):
+                          item['status'] = 'missing_rows'
+                      else:
+                          days = set()
+                          for bar in rows:
+                              if not isinstance(bar, dict):
+                                  continue
+                              d = parse_day(bar.get('bsop_date'))
+                              o = parse_number(bar.get('stck_oprc'), True)
+                              h = parse_number(bar.get('stck_hgpr'), True)
+                              l = parse_number(bar.get('stck_lwpr'), True)
+                              c = parse_number(bar.get('stck_clpr'), True)
+                              v = parse_number(bar.get('acml_vol'))
+                              if (not d or d > expected or None in (o, h, l, c, v)
+                                  or l > min(o, c) or h < max(o, c) or h < l):
+                                  continue
+                              days.add(d)
+                          if days:
+                              item['latest_valid_date'] = max(days)
+                              item['valid_history_days'] = len(days)
+                              item['fresh_for_expected_session'] = max(days) == expected
+                              item['ready_for_200_day_line'] = len(days) >= 200
+                              item['status'] = 'ok' if item['fresh_for_expected_session'] else 'stale'
+                          else:
+                              item['status'] = 'no_valid_ohlcv'
+                      break
+                  except Exception:
+                      item['status'] = 'request_failed'
+                      if attempt == 0:
+                          time.sleep(2)
+              report['stocks'].append(item)
+              counts[item['status']] += 1
+              print(f'{i:03d}/100 code={code} date={item["latest_valid_date"]} '
+                    f'history={item["valid_history_days"]} status={item["status"]}', flush=True)
+              time.sleep(0.65)
+
+          fresh = sum(x['fresh_for_expected_session'] for x in report['stocks'])
+          hist = sum(x['ready_for_200_day_line'] for x in report['stocks'])
+          report.update(total_requested=100, fresh_date_count=fresh,
+                        history_200_plus_count=hist,
+                        status_counts=dict(sorted(counts.items())))
+          Path('nh-100-audit/summary.json').write_text(
+              json.dumps(report, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
+          summary = (f'### 종배 NH 나무 100종목 읽기 전용 검증\n'
+                     f'- 점검일시: {NOW:%Y-%m-%d %H:%M} KST\n'
+                     f'- 최종 확정 거래일 추정: {expected}\n'
+                     f'- 날짜 일치: **{fresh}/100**\n'
+                     f'- 유효 일봉 200일 이상: **{hist}/100**\n'
+                     f'- 시세·주문·계좌정보·API 키 출력 없음\n'
+                     f'- 웹사이트 변경 및 주문 실행 없음\n')
+          print(summary, flush=True)
+          if os.getenv('GITHUB_STEP_SUMMARY'):
+              with open(os.environ['GITHUB_STEP_SUMMARY'], 'a', encoding='utf-8') as f:
+                  f.write(summary)
+          if fresh < 90 or hist < 85:
+              raise SystemExit(f'NEEDS REVIEW: fresh={fresh}/100 history200={hist}/100')
+          print('PILOT PASSED: 100 stocks audited')
+          PY
+      - name: Upload safe summary only
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: jongbe-v8893-nh-100-private-audit-${{ github.run_id }}
+          path: nh-100-audit/summary.json
+          if-no-files-found: warn
+          retention-days: 7
