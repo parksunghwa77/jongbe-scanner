@@ -1,0 +1,250 @@
+name: Jongbe V8.8.9.6 NH 300-stock score research (read-only)
+
+on:
+  push:
+    branches: [v8.8.4-test]
+    paths:
+      - '.github/workflows/v8896-nh-300-score-research.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: jongbe-v8896-nh-300-research
+  cancel-in-progress: false
+
+jobs:
+  research-300:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      NHPLUG_APP_KEY: ${{ secrets.NAMUH_APP_KEY }}
+      NHPLUG_APP_SECRET: ${{ secrets.NAMUH_APP_SECRET_KEY }}
+      NHPLUG_BASE_URL: https://api.nhplug.com:8443
+      NHPLUG_AUTH_URL: https://api.nhplug.com:8443
+      NHPLUG_RATE_LIMIT: '2'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Install read-only historical client
+        run: python -m pip install --disable-pip-version-check 'nhplug==0.4.1' 'exchange-calendars>=4.9,<5' pandas
+      - name: Compare baseline and revised score on chronological cohorts
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p nh-v8896
+          cat > /tmp/jongbe_v8896.py <<'PY'
+          from collections import Counter
+          from datetime import datetime, date, timedelta, time as daytime
+          from pathlib import Path
+          from zoneinfo import ZoneInfo
+          import json, os, re, time
+          import exchange_calendars as ec
+          import pandas as pd
+          from nhplug import call
+
+          NOW=datetime.now(ZoneInfo('Asia/Seoul'))
+          cutoff=NOW.date() if NOW.time()>=daytime(16,30) else NOW.date()-timedelta(days=1)
+          closed={'2026-06-03','2026-07-17'}
+          sessions=ec.get_calendar('XKRX').sessions_in_range(pd.Timestamp(cutoff-timedelta(days=45)),pd.Timestamp(cutoff))
+          target=[s.date().isoformat() for s in sessions if s.date().isoformat() not in closed][-1]
+          if not os.getenv('NHPLUG_APP_KEY') or not os.getenv('NHPLUG_APP_SECRET'):
+              raise RuntimeError('Missing NH API credentials')
+          universe=json.loads(Path('results.json').read_text(encoding='utf-8'))
+          pools={'KOSPI':set(),'KOSDAQ':set()}
+          for row in universe.get('rows',[]):
+              market,code=row.get('market'),str(row.get('code',''))
+              if market in pools and re.fullmatch(r'\d{6}',code): pools[market].add(code)
+          if sum(map(len,pools.values()))<2000: raise RuntimeError('Universe incomplete')
+          anchors=[('KOSPI','005930'),('KOSPI','000660'),('KOSDAQ','328130')]
+          if any(c not in pools[m] for m,c in anchors): raise RuntimeError('Anchor missing')
+          excluded={c for _,c in anchors}
+          def pick(m,n):
+              options=sorted(pools[m]-excluded)
+              if len(options)<n: raise RuntimeError('Insufficient ticker universe')
+              return [(m, options[i*(len(options)-1)//(n-1)]) for i in range(n)]
+          stocks=anchors+pick('KOSPI',148)+pick('KOSDAQ',149)
+          assert len(stocks)==300 and len({c for _,c in stocks})==300
+
+          def parse_date(value):
+              for fmt in ('%y/%m/%d','%Y-%m-%d','%Y%m%d','%Y/%m/%d','%y%m%d'):
+                  try:
+                      d=datetime.strptime(str(value or '').strip(),fmt).date()
+                      return d.isoformat() if date(2020,1,1)<=d<=date(2032,12,31) else None
+                  except ValueError: pass
+              return None
+
+          def number(value,positive=False):
+              if value is None or isinstance(value,bool): return None
+              s=str(value).strip().replace(',','')
+              if not re.fullmatch(r'\d{1,15}(?:\.\d{1,4})?',s): return None
+              n=float(s)
+              return n if (n>0 if positive else n>=0) else None
+          counts=Counter()
+          private=Path('/tmp/jongbe_v8896_private.ndjson')
+          with private.open('w',encoding='utf-8') as f:
+              os.chmod(private,0o600)
+              for i,(market,code) in enumerate(stocks,1):
+                  status='request_failed'
+                  try:
+                      response=call('/krstock/quote/v1/currentDaily',{'market_cd':'KRX','iem_cd':code,'array_cnt':'452','view_main_yn':'Y'})
+                      rows=response.get('Output_0') if isinstance(response,dict) else None
+                      if isinstance(rows,dict): rows=[rows]
+                      if not isinstance(rows,list) or not rows: status='missing_rows'
+                      else:
+                          dated={}; conflict=False
+                          for r in rows:
+                              if not isinstance(r,dict): continue
+                              d=parse_date(r.get('bsop_date'))
+                              if not d or d>target:continue
+                              o=number(r.get('stck_oprc'),True);h=number(r.get('stck_hgpr'),True)
+                              l=number(r.get('stck_lwpr'),True);c=number(r.get('stck_clpr'),True)
+                              v=number(r.get('acml_vol'))
+                              if None in (o,h,l,c,v) or not(l<=min(o,c) and max(o,c)<=h): continue
+                              bar=[d,o,h,l,c,v]
+                              if d in dated and dated[d]!=bar: conflict=True
+                              dated[d]=bar
+                          days=sorted(dated)
+                          if conflict: status='duplicate_conflict'
+                          elif not days: status='no_valid_bars'
+                          elif days[-1]!=target: status='stale_session'
+                          elif len(days)<200: status='under_200'
+                          else:
+                              f.write(json.dumps({'market':market,'code':code,'bars':[dated[d] for d in days]})+'\n')
+                              status='ready'
+                  except Exception:status='request_failed'
+                  counts[status]+=1
+                  if i%25==0:print(f'Progress {i}/300: ready {counts["ready"]}',flush=True)
+                  time.sleep(.7)
+          report={'schema':'jongbe-v8896-score-experiment-v1','asof':target,
+                  'checked_at_kst':NOW.isoformat(timespec='seconds'),
+                  'universe_asof':universe.get('asof'),'sample_count':300,
+                  'ready_history':counts['ready'],'data_status_counts':dict(counts),
+                  'selection':'same 3 anchor + 148 KOSPI + 149 KOSDAQ sample as v8895',
+                  'orders_or_accounts_used':False,'website_modified':False,
+                  'licensed_quote_data_exported':False,
+                  'note':'Research only. Not an independent untouched holdout; changes informed by previous 300-stock results.'}
+          Path('nh-v8896/summary.json').write_text(json.dumps(report,ensure_ascii=False,indent=2)+'\n',encoding='utf8')
+          PY
+          python /tmp/jongbe_v8896.py
+          node <<'JS'
+          const fs=require('node:fs');
+          const engine=require(process.cwd()+'/v88/v88-engine.js');
+          const p='nh-v8896/summary.json',report=JSON.parse(fs.readFileSync(p,'utf8'));
+          const raw=fs.readFileSync('/tmp/jongbe_v8896_private.ndjson','utf8').trim();
+          const rows=raw?raw.split('\n').map(JSON.parse):[];
+          const groupLabels=['baseline_all','baseline_60plus','revised_60plus','revised_70plus','rebound','trend_breakout','other'];
+          const groups=Object.fromEntries(['earlier','later'].map(x=>[x,Object.fromEntries(groupLabels.map(k=>[k,[]]))]));
+          const reasonCounts={},currentKinds={};let analyzed=0,events=0,currentSignals=0;
+          const avg=a=>a.length?a.reduce((x,y)=>x+y,0)/a.length:null;
+          const bump=(o,k)=>o[k]=(o[k]||0)+1;
+          function baseline(bars,res){
+           const cls=bars.map(b=>b[4]),m5=engine.rolling(cls,5).at(-1),m20=engine.rolling(cls,20).at(-1),m200=engine.rolling(cls,200).at(-1);
+           if(![m5,m20,m200].every(Number.isFinite))return null;
+           const c=cls.at(-1),v=bars.at(-1)[5],av=avg(bars.slice(-21,-1).map(b=>b[5]));
+           const vr=av>0?v/av:null,turn=avg(bars.slice(-21,-1).map(b=>b[4]*b[5]));
+           const bullish=res.signals.filter(s=>!['black_soldiers','cloud_failed'].includes(s));
+           let score=(c>m5?10:0)+(c>m20?12:0)+(c>m200?12:0)+(m5>m20?10:0)+(m20>m200?10:0)
+              +(vr!==null&&vr>=1.5?12:vr!==null&&vr>=1.1?6:0)
+              +(Number.isFinite(turn)&&turn>=5e10?10:Number.isFinite(turn)&&turn>=2e10?5:0)
+              +(bullish.length?14:0)+(res.risk==='signal'?10:0);
+           if(res.risk==='danger')score=Math.min(score,39);
+           return {score:Math.max(0,Math.min(100,score)),m5,m20,m200,vr,turn,c};
+          }
+          // Prespecified, heuristic research score. Never fitted to outcome labels.
+          function revised(b,res,s){
+           const close=s.c, ma20=s.m20, ma200=s.m200;
+           const prior=b.slice(-21,-1), volAvg=avg(prior.map(x=>x[5]));
+           const vr=s.vr, dist20=ma20>0?close/ma20-1:0;
+           const min20=Math.min(...b.slice(-20).map(x=>x[3]));
+           const lowNear=min20>0?close/min20-1:99;
+           const volCooling=vr!==null&&vr>=0.65&&vr<=1.6;
+           const rebound= b.length>=200 && b.at(-2)[4]<=s.m5 && close>s.m5 && lowNear<=0.12 && close>=ma20*0.96 && close<=ma20*1.07;
+           const trend=res.signals.some(x=>['bb_breakout_volume','bb_squeeze_breakout','cloud_breakout'].includes(x));
+           const extended=dist20>0.12 || (vr!==null&&vr>3.5);
+           let pts=0;
+           pts+=(close>s.m5?12:0)+(s.m5>=ma20?12:0)+(close>=ma200?8:0);
+           pts+=Math.abs(dist20)<=0.04?18:Math.abs(dist20)<=0.08?10:0;
+           pts+=vr!==null&&vr>=1&&vr<=2.3?12:vr!==null&&vr>0.65&&vr<3.0?6:0;
+           pts+=Number.isFinite(s.turn)&&s.turn>=5e10?8:Number.isFinite(s.turn)&&s.turn>=2e10?4:0;
+           pts+=volCooling?6:0;
+           pts+=rebound?16:trend?14:0;
+           pts+=res.risk==='signal'?8:0;
+           if(extended)pts-=25;
+           if(res.risk==='danger')pts=Math.min(pts,35);
+           return {score:Math.max(0,Math.min(100,pts)),kind:rebound?'rebound':trend?'trend_breakout':'other',extended};
+          }
+          function calc(a){const returns=a.map(v=>v.ret),n=returns.length,mean=avg(returns);return {events:n,avg_next_close_pct:mean===null?null:+mean.toFixed(4),positive_pct:n?+(returns.filter(x=>x>0).length/n*100).toFixed(2):null};}
+          // chronological event days: earlier=first 20 dates, later=last 20 dates, if 40 sessions available.
+          // Overlapping symbols/days are dependent. Current test is exploratory, not confirmatory OOS.
+          for(const row of rows){
+           try{
+            const b=row.bars;
+            if(b.length<240) {bump(reasonCounts,'under_240_for_40_day_comparison');continue;}
+            const now=engine.analyze(b.slice(-200));if(!now.ready)throw Error('engine_unready');
+            analyzed++;if(now.risk==='signal')currentSignals++;
+            const last=baseline(b.slice(-200),now);if(last){const v=revised(b.slice(-200),now,last);bump(currentKinds,v.kind);}
+            const start=b.length-41;
+            for(let i=start;i<b.length-1;i++){
+              const history=b.slice(i-199,i+1),res=engine.analyze(history);
+              if(!res.ready||res.risk!=='signal')continue;
+              const s=baseline(history,res);if(!s)continue;
+              const v=revised(history,res,s),next=b[i+1];
+              const ret=(next[4]/s.c-1)*100;
+              if(!Number.isFinite(ret))continue;
+              // Split by time-position, not by event count, so both cohorts are chronological.
+              const period=(i-start)<20?'earlier':'later';const item={ret};events++;
+              groups[period].baseline_all.push(item);
+              if(s.score>=60)groups[period].baseline_60plus.push(item);
+              if(v.score>=60)groups[period].revised_60plus.push(item);
+              if(v.score>=70)groups[period].revised_70plus.push(item);
+              groups[period][v.kind].push(item);
+            }
+           }catch(e){bump(reasonCounts,['engine_unready'].includes(e.message)?e.message:'engine_exception');}
+          }
+          const results={};for(const [period,metrics] of Object.entries(groups)){
+           results[period]={};for(const [key,a] of Object.entries(metrics))results[period][key]=calc(a);
+          }
+          Object.assign(report,{eligible_for_40_day_comparison:analyzed,latest_signal_count:currentSignals,
+           historical_signal_events:events,results,latest_pattern_distribution:currentKinds,
+           exclusions:reasonCounts,fee_slippage:'0%; gross percent returns; no executable closing-fill assumption',
+           score_formula:'experimental_v2 fixed heuristic; changed after inspecting v8895 so later cohort is not untouched holdout',
+           future_data_leakage_prevented:'each event evaluated on bars through signal day; next bar used only as outcome',
+           evaluation_limits:'20+20 trailing-day exploratory cohorts, selected current universe, dependent events and survivorship bias',
+           successful_diagnostic:report.ready_history>=270&&analyzed>=250});
+          fs.writeFileSync(p,JSON.stringify(report,null,2)+'\n');
+          const lines=['### 종배 V8.8.9.6 실험용 점수 재평가 (읽기 전용)',
+           `- 확정 거래일: ${report.asof}`,
+           `- 유효 일봉 200일 이상: ${report.ready_history}/300`,
+           `- 40일 비교 가능: ${analyzed}/300`,
+           `- 과거 신호 건수: ${events}; 최신 신호: ${currentSignals}`,
+           '- 점수 공식: 임시 V2 (이격도·과열 감점·거래량·반등/돌파 구분)',
+           ...Object.entries(results).flatMap(([period,r])=>[
+           `- **${period==='earlier'?'전반 20일':'후반 20일'}** 기존 60점+: ${JSON.stringify(r.baseline_60plus)}`,
+           `- **${period==='earlier'?'전반 20일':'후반 20일'}** 개선 60점+: ${JSON.stringify(r.revised_60plus)}`,
+           `- **${period==='earlier'?'전반 20일':'후반 20일'}** 개선 70점+: ${JSON.stringify(r.revised_70plus)}`,
+           `- 유형별: 반등 ${JSON.stringify(r.rebound)}, 추세 ${JSON.stringify(r.trend_breakout)}, 기타 ${JSON.stringify(r.other)}`]),
+           `- 검증 제외 사유: ${JSON.stringify(reasonCounts)}`,
+           '- **주의:** 이미 전 버전 결과를 보고 설계했으므로 독립적인 검증이 아님. 비용 제외. 투자 추천 아님.',
+           '- 운영 스캐너·계좌·주문 변경 없음. 원시 시세 데이터 공개 없음.'];
+          if(process.env.GITHUB_STEP_SUMMARY)fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY,lines.join('\n')+'\n');
+          console.log('AGGREGATE ONLY',JSON.stringify({analyzed,events,exclusions:reasonCounts}));
+          if(!report.successful_diagnostic)process.exitCode=1;
+          JS
+      - name: Remove ephemeral licensed quotes
+        if: always()
+        run: rm -f /tmp/jongbe_v8896_private.ndjson
+      - name: Upload aggregate-only audit
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: jongbe-v8896-research-${{ github.run_id }}
+          path: nh-v8896/summary.json
+          if-no-files-found: warn
+          retention-days: 7
