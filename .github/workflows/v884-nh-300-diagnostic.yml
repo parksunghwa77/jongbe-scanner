@@ -1,0 +1,197 @@
+name: Jongbe NH 300-stock historical data diagnostic (read-only)
+
+on:
+  push:
+    branches: [v8.8.4-test]
+    paths:
+      - '.github/workflows/v884-nh-300-diagnostic.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: jongbe-nh-300-data-diagnostic
+  cancel-in-progress: false
+
+jobs:
+  inspect-300:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      NHPLUG_APP_KEY: ${{ secrets.NAMUH_APP_KEY }}
+      NHPLUG_APP_SECRET: ${{ secrets.NAMUH_APP_SECRET_KEY }}
+      NHPLUG_BASE_URL: https://api.nhplug.com:8443
+      NHPLUG_AUTH_URL: https://api.nhplug.com:8443
+      NHPLUG_RATE_LIMIT: '2'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install read-only client and KRX calendar
+        run: python -m pip install --disable-pip-version-check 'nhplug==0.4.1' 'exchange-calendars>=4.9,<5' pandas
+      - name: Diagnose 300 stock histories without publishing market data
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p nh-300-report
+          python - <<'PY'
+          from collections import Counter
+          from datetime import datetime, date, timedelta, time as daytime
+          from pathlib import Path
+          from zoneinfo import ZoneInfo
+          import json, os, re, time
+          import exchange_calendars as ec
+          import pandas as pd
+          from nhplug import call
+
+          # 200 valid distinct sessions are enough for a 200-day moving average.
+          # This is a data coverage audit, NOT the existing 452-day indicator test.
+          SIZE = 300
+          EXPECTED_HISTORY = 200
+          NOW = datetime.now(ZoneInfo('Asia/Seoul'))
+          cutoff = NOW.date() if NOW.time() >= daytime(16, 30) else NOW.date()-timedelta(days=1)
+          closed = {'2026-06-03', '2026-07-17'}
+          session_days = ec.get_calendar('XKRX').sessions_in_range(
+              pd.Timestamp(cutoff-timedelta(days=45)), pd.Timestamp(cutoff))
+          valid_sessions = [x.date().isoformat() for x in session_days
+                            if x.date().isoformat() not in closed]
+          if not valid_sessions:
+              raise RuntimeError('No eligible KRX sessions found')
+          target = valid_sessions[-1]
+          if not os.getenv('NHPLUG_APP_KEY') or not os.getenv('NHPLUG_APP_SECRET'):
+              raise RuntimeError('Missing secrets. Secret values are never logged')
+
+          universe = json.loads(Path('results.json').read_text(encoding='utf-8'))
+          pools = {'KOSPI': set(), 'KOSDAQ': set()}
+          for row in universe.get('rows', []):
+              code = str(row.get('code', ''))
+              market = row.get('market')
+              if market in pools and re.fullmatch(r'\d{6}', code):
+                  pools[market].add(code)
+          if sum(map(len, pools.values())) < 2000:
+              raise RuntimeError('Source universe incomplete')
+
+          anchors = [('KOSPI', '005930'), ('KOSPI', '000660'), ('KOSDAQ', '328130')]
+          for market, code in anchors:
+              if code not in pools[market]:
+                  raise RuntimeError('Regression ticker missing from source universe')
+          excluded = {code for _,code in anchors}
+          def sample(market, count):
+              choices = sorted(pools[market]-excluded)
+              if len(choices) < count:
+                  raise RuntimeError('Not enough securities to sample')
+              return [(market, choices[i*(len(choices)-1)//(count-1)])
+                      for i in range(count)]
+          selected = anchors + sample('KOSPI', 148) + sample('KOSDAQ', 149)
+          assert len(selected) == SIZE and len({code for _,code in selected}) == SIZE
+
+          def dayparse(v):
+              s = str(v or '').strip()
+              for fmt in ('%y/%m/%d', '%Y-%m-%d', '%Y%m%d', '%Y/%m/%d', '%y%m%d'):
+                  try:
+                      d = datetime.strptime(s, fmt).date()
+                      return d.isoformat() if date(2020,1,1) <= d <= date(2032,12,31) else None
+                  except ValueError:
+                      pass
+              return None
+          def numeric(v, positive=False):
+              if v is None or isinstance(v,bool): return None
+              s = str(v).strip().replace(',', '')
+              if not re.fullmatch(r'\d{1,15}(?:\.\d{1,4})?', s): return None
+              n = float(s)
+              return n if (n > 0 if positive else n >= 0) else None
+
+          reasons = Counter()
+          batches = []
+          report = {
+              'schema': 'jongbe-nh-300-history-diagnostic-v1',
+              'checked_at_kst': NOW.isoformat(timespec='seconds'),
+              'target_completed_session': target,
+              'universe_asof': universe.get('asof'),
+              'attempted': SIZE,
+              'selection': '3 regression symbols + 148 spaced KOSPI + 149 spaced KOSDAQ',
+              'required_distinct_valid_history_sessions': EXPECTED_HISTORY,
+              'licensed_quotes_in_artifact': False,
+              'orders_or_accounts_used': False,
+              'website_modified': False,
+              'batches': [],
+          }
+          for batch_no in range(3):
+              selected_batch = selected[batch_no*100:(batch_no+1)*100]
+              counts = Counter()
+              for idx, (market, code) in enumerate(selected_batch, 1):
+                  status = 'request_failed'
+                  try:
+                      response = call('/krstock/quote/v1/currentDaily', {
+                          'market_cd':'KRX', 'iem_cd': code,
+                          'array_cnt':'452', 'view_main_yn':'Y'})
+                      rows = response.get('Output_0') if isinstance(response,dict) else None
+                      if isinstance(rows,dict): rows=[rows]
+                      if not isinstance(rows,list) or not rows:
+                          status='missing_rows'
+                      else:
+                          days=set()
+                          invalid_count=0
+                          for r in rows:
+                              if not isinstance(r,dict):
+                                  invalid_count+=1; continue
+                              d = dayparse(r.get('bsop_date'))
+                              o = numeric(r.get('stck_oprc'),True)
+                              h = numeric(r.get('stck_hgpr'),True)
+                              l = numeric(r.get('stck_lwpr'),True)
+                              c = numeric(r.get('stck_clpr'),True)
+                              v = numeric(r.get('acml_vol'))
+                              if not d or d>target or None in (o,h,l,c,v) or not (l<=min(o,c) and max(o,c)<=h):
+                                  invalid_count+=1; continue
+                              days.add(d)
+                          if not days:
+                              status='no_valid_bars'
+                          elif max(days)!=target:
+                              status='latest_session_mismatch'
+                          elif len(days)<EXPECTED_HISTORY:
+                              status='fewer_than_200_valid_sessions'
+                          else:
+                              status='ready_200_plus'
+                          if invalid_count and status=='ready_200_plus':
+                              counts['ready_with_invalid_rows_skipped']+=1
+                  except Exception:
+                      # Never print provider exception: it may contain headers or keys.
+                      status='request_failed'
+                  counts[status]+=1
+                  reasons[status]+=1
+                  if idx%25==0:
+                      print(f'Batch {batch_no+1}/3: {idx}/100; 200-day-ready={counts["ready_200_plus"]}; other={idx-counts["ready_200_plus"]}',flush=True)
+                  time.sleep(0.7)
+              report['batches'].append({
+                  'batch_index':batch_no,
+                  'attempted':100,
+                  'ready_200_plus':counts['ready_200_plus'],
+                  'reason_counts':dict(sorted(counts.items()))
+              })
+          report['ready_200_plus']=reasons['ready_200_plus']
+          report['reason_counts']=dict(sorted(reasons.items()))
+          report['not_ready']=SIZE-reasons['ready_200_plus']
+          report['audit_complete']=True
+          report['note']='Data diagnostic only; original V8.8 452-day indicator engine is not evaluated here.'
+          out=Path('nh-300-report/summary.json')
+          out.write_text(json.dumps(report,ensure_ascii=False,indent=2)+'\n',encoding='utf-8')
+          if os.getenv('GITHUB_STEP_SUMMARY'):
+              with open(os.environ['GITHUB_STEP_SUMMARY'],'a',encoding='utf8') as f:
+                  f.write('### 종배 NH 300종목 데이터 진단 (읽기 전용)\n')
+                  f.write(f'- 최근 확정 거래일: {target}\n')
+                  f.write(f'- 200일 데이터 준비: {report["ready_200_plus"]}/300\n')
+                  f.write(f'- 실패 사유별 건수: `{json.dumps(report["reason_counts"],ensure_ascii=False)}`\n')
+                  f.write('- 거래 시세/비밀키/계좌/주문 데이터 게시 없음\n')
+          print('AUDIT DONE: '+json.dumps(report['reason_counts'],ensure_ascii=False),flush=True)
+          if report['ready_200_plus'] < 270:
+              raise SystemExit('INSUFFICIENT 200-DAY COVERAGE: see summary artifact; no production changes')
+      - name: Upload aggregate-only diagnostic
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: jongbe-nh-300-diagnostic-${{ github.run_id }}
+          path: nh-300-report/summary.json
+          if-no-files-found: warn
+          retention-days: 7
