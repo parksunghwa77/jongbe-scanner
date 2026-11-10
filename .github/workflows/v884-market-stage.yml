@@ -41,7 +41,7 @@ jobs:
         shell: bash
         env:
           START_BATCH: ${{ inputs.start_batch || '0' }}
-          BATCH_COUNT: ${{ inputs.batch_count || '2' }}
+          BATCH_COUNT: ${{ inputs.batch_count || '3' }}
         run: |
           python - <<'PY'
           import json, os, re
