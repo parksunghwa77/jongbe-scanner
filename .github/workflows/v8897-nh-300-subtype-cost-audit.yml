@@ -1,0 +1,257 @@
+name: Jongbe V8.8.9.7 NH 300-stock subtype and costs audit (read-only)
+
+on:
+  push:
+    branches: [v8.8.4-test]
+    paths:
+      - '.github/workflows/v8897-nh-300-subtype-cost-audit.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: jongbe-v8897-nh-300-readonly
+  cancel-in-progress: false
+
+jobs:
+  subtype-audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      NHPLUG_APP_KEY: ${{ secrets.NAMUH_APP_KEY }}
+      NHPLUG_APP_SECRET: ${{ secrets.NAMUH_APP_SECRET_KEY }}
+      NHPLUG_BASE_URL: https://api.nhplug.com:8443
+      NHPLUG_AUTH_URL: https://api.nhplug.com:8443
+      NHPLUG_RATE_LIMIT: '2'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Install read-only NH client and KRX calendar
+        run: python -m pip install --disable-pip-version-check 'nhplug==0.4.1' 'exchange-calendars>=4.9,<5' pandas
+      - name: Fetch private bars and audit event subtypes with hypothetical costs
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p nh-v8897
+          trap 'rm -f /tmp/jongbe_v8897_private.ndjson' EXIT
+          python - <<'PY'
+          import json, os, re, time
+          from collections import Counter
+          from datetime import date, datetime, timedelta, time as daytime
+          from pathlib import Path
+          from zoneinfo import ZoneInfo
+          import exchange_calendars as ec
+          import pandas as pd
+          from nhplug import call
+
+          now=datetime.now(ZoneInfo('Asia/Seoul'))
+          cutoff=now.date() if now.time()>=daytime(16,30) else now.date()-timedelta(days=1)
+          closed={'2026-06-03','2026-07-17'}
+          sessions=ec.get_calendar('XKRX').sessions_in_range(pd.Timestamp(cutoff-timedelta(days=45)),pd.Timestamp(cutoff))
+          dates=[x.date().isoformat() for x in sessions if x.date().isoformat() not in closed]
+          if not dates:raise RuntimeError('No completed session')
+          target=dates[-1]
+          if not os.getenv('NHPLUG_APP_KEY') or not os.getenv('NHPLUG_APP_SECRET'):
+              raise RuntimeError('NH credentials missing')
+          universe=json.loads(Path('results.json').read_text(encoding='utf-8'))
+          pools={'KOSPI':set(),'KOSDAQ':set()}
+          for r in universe.get('rows',[]):
+              market,code=r.get('market'),str(r.get('code',''))
+              if market in pools and re.fullmatch(r'\d{6}',code):pools[market].add(code)
+          if sum(map(len,pools.values()))<2000:raise RuntimeError('Incomplete sample universe')
+          anchors=[('KOSPI','005930'),('KOSPI','000660'),('KOSDAQ','328130')]
+          if any(c not in pools[m] for m,c in anchors):raise RuntimeError('Regression stock missing')
+          excluded={c for _,c in anchors}
+          def sample(m,n):
+              xs=sorted(pools[m]-excluded)
+              if len(xs)<n:raise RuntimeError('Universe too small')
+              return [(m,xs[i*(len(xs)-1)//(n-1)]) for i in range(n)]
+          selected=anchors+sample('KOSPI',148)+sample('KOSDAQ',149)
+          assert len(selected)==300 and len({c for _,c in selected})==300
+          def parse_date(value):
+              for fmt in ('%y/%m/%d','%Y-%m-%d','%Y%m%d','%Y/%m/%d','%y%m%d'):
+                  try:
+                      d=datetime.strptime(str(value or '').strip(),fmt).date()
+                      return d.isoformat() if date(2020,1,1)<=d<=date(2032,12,31) else None
+                  except ValueError:pass
+              return None
+          def numeric(x,positive=False):
+              if x is None or isinstance(x,bool):return None
+              s=str(x).strip().replace(',','')
+              if not re.fullmatch(r'\d{1,15}(?:\.\d{1,4})?',s):return None
+              n=float(s)
+              return n if (n>0 if positive else n>=0) else None
+          stats=Counter()
+          private=Path('/tmp/jongbe_v8897_private.ndjson')
+          with private.open('w',encoding='utf-8') as f:
+              os.chmod(private,0o600)
+              for i,(market,code) in enumerate(selected,1):
+                  reason='request_failed'
+                  try:
+                      res=call('/krstock/quote/v1/currentDaily',{
+                          'market_cd':'KRX','iem_cd':code,'array_cnt':'452','view_main_yn':'Y'})
+                      rows=res.get('Output_0') if isinstance(res,dict) else None
+                      if isinstance(rows,dict):rows=[rows]
+                      if not isinstance(rows,list) or not rows:reason='missing_rows'
+                      else:
+                          dated={};conflict=False
+                          for r in rows:
+                              if not isinstance(r,dict):continue
+                              d=parse_date(r.get('bsop_date'))
+                              if not d or d>target:continue
+                              o=numeric(r.get('stck_oprc'),True)
+                              h=numeric(r.get('stck_hgpr'),True)
+                              l=numeric(r.get('stck_lwpr'),True)
+                              c=numeric(r.get('stck_clpr'),True)
+                              v=numeric(r.get('acml_vol'))
+                              if None in (o,h,l,c,v) or not l<=min(o,c)<=max(o,c)<=h:continue
+                              bar=[d,o,h,l,c,v]
+                              if d in dated and dated[d]!=bar:conflict=True
+                              dated[d]=bar
+                          days=sorted(dated)
+                          if conflict:reason='duplicate_conflict'
+                          elif not days:reason='no_valid_bars'
+                          elif days[-1]!=target:reason='stale_session'
+                          elif len(days)<200:reason='under_200'
+                          else:
+                              f.write(json.dumps({'market':market,'code':code,'bars':[dated[d] for d in days]})+'\n')
+                              reason='ready'
+                  except Exception:
+                      reason='request_failed' # Do not print potentially credential-bearing provider errors.
+                  stats[reason]+=1
+                  if i%25==0:print(f'NH history {i}/300, ready={stats["ready"]}',flush=True)
+                  time.sleep(0.7)
+          report={'schema':'jongbe-v8897-subtypes-costs-v1','target_date':target,
+              'checked_at_kst':now.isoformat(timespec='seconds'),
+              'sample_size':300,'history_ready':stats['ready'],
+              'data_status':dict(sorted(stats.items())),
+              'test_branch_only':True,'accounts_or_orders_used':False,
+              'website_modified':False,'licensed_quotes_exported':False,
+              'selection':'same fixed 300-stock sample as v8896; current-universe selection may cause survivorship bias',
+              'warnings':['Exploratory reuse of previously inspected data, not independent validation',
+                          'Next-session returns assume hypothetical signal-day close entry',
+                          'No real KOSPI index data; sample breadth is only a proxy']}
+          Path('nh-v8897/summary.json').write_text(json.dumps(report,ensure_ascii=False,indent=2)+'\n',encoding='utf8')
+          PY
+          node <<'JS'
+          const fs=require('node:fs');
+          const engine=require(process.cwd()+'/v88/v88-engine.js');
+          const file='nh-v8897/summary.json';
+          const report=JSON.parse(fs.readFileSync(file,'utf8'));
+          const raw=fs.readFileSync('/tmp/jongbe_v8897_private.ndjson','utf8').trim();
+          const stocks=raw?raw.split('\n').map(JSON.parse):[];
+          const avg=a=>a.length?a.reduce((x,y)=>x+y,0)/a.length:null;
+          const bump=(obj,key)=>obj[key]=(obj[key]||0)+1;
+          const errors={},subtypeCounts={},latestKinds={};
+          // Sample-wide breadth at a date uses that date's closes only, not the future result.
+          const breadth=new Map();
+          for(const stock of stocks){
+            const b=stock.bars;
+            for(let i=1;i<b.length;i++){
+              const d=b[i][0],prior=b[i-1][4],c=b[i][4];
+              if(prior<=0)continue;
+              if(!breadth.has(d))breadth.set(d,{up:0,total:0});
+              const v=breadth.get(d);v.total++;if(c>prior)v.up++;
+            }
+          }
+          const events=[];let analyzed=0,eligible40=0;
+          function classify(b,r){
+            const cls=b.map(x=>x[4]),c=cls.at(-1),p=cls.at(-2);
+            const m5=engine.rolling(cls,5).at(-1),m20=engine.rolling(cls,20).at(-1);
+            const low=Math.min(...b.slice(-20).map(x=>x[3]));
+            const rebound=Number.isFinite(m5)&&Number.isFinite(m20)&&p<=m5&&c>m5&&c/low-1<=.12&&c>=m20*.96&&c<=m20*1.07;
+            const trend=r.signals.some(s=>['bb_breakout_volume','bb_squeeze_breakout','cloud_breakout'].includes(s));
+            if(rebound)return 'rebound';
+            if(trend)return 'trend_breakout';
+            // Otherwise was called 'other' in v8896; identify the actual signal set.
+            return 'other';
+          }
+          function subtype(r,kind){
+            if(kind!=='other')return kind;
+            const ss=r.signals.filter(s=>!['black_soldiers','cloud_failed'].includes(s)).sort();
+            return ss.length?`other:${ss.join('+')}`:'other:no_positive_signal';
+          }
+          for(const stock of stocks){
+            try{
+              const b=stock.bars;
+              if(b.length<200)throw Error('under_200');
+              const latest=engine.analyze(b.slice(-200));
+              if(!latest.ready)throw Error('engine_not_ready');
+              analyzed++;
+              if(latest.risk==='signal')bump(latestKinds,subtype(latest,classify(b.slice(-200),latest)));
+              if(b.length<241){bump(errors,'under_241_for_40_day_review');continue;}
+              eligible40++;
+              const start=b.length-41;
+              for(let i=start;i<b.length-1;i++){
+                const prefix=b.slice(i-199,i+1),r=engine.analyze(prefix);
+                if(!r.ready||r.risk!=='signal')continue;
+                const entry=prefix.at(-1)[4],next=b[i+1];
+                if(!(entry>0&&next[1]>0&&next[4]>0))continue;
+                const kind=classify(prefix,r),sub=subtype(r,kind);
+                const d=prefix.at(-1)[0],br=breadth.get(d);
+                const breadthRatio=br&&br.total>=50?br.up/br.total:null;
+                const regime=breadthRatio===null?'unknown':breadthRatio>=.6?'broad_up':breadthRatio<=.4?'broad_down':'mixed';
+                const event={phase:i-start<20?'earlier':'later',kind,subtype:sub,
+                  regime,open:(next[1]/entry-1)*100,close:(next[4]/entry-1)*100};
+                events.push(event);bump(subtypeCounts,sub);
+              }
+            }catch(e){bump(errors,e.message==='under_200'||e.message==='engine_not_ready'?e.message:'engine_exception');}
+          }
+          function metrics(a,key,cost){
+            const vals=a.map(x=>x[key]-cost).filter(Number.isFinite),m=avg(vals);
+            return {n:vals.length,avg_pct:m===null?null:+m.toFixed(4),win_pct:vals.length?+(100*vals.filter(v=>v>0).length/vals.length).toFixed(2):null};
+          }
+          function table(field){
+            const out={};for(const phase of ['earlier','later']){
+              const subset=events.filter(x=>x.phase===phase);
+              const labels=[...new Set(subset.map(x=>x[field]))].sort();
+              out[phase]={};
+              for(const label of labels){const a=subset.filter(x=>x[field]===label);
+                out[phase][label]={gross_next_close:metrics(a,'close',0),
+                  net_next_close_0_3:metrics(a,'close',.3),net_next_close_0_5:metrics(a,'close',.5),
+                  net_next_close_0_7:metrics(a,'close',.7),net_next_open_0_5:metrics(a,'open',.5)};
+              }
+            }
+            return out;
+          }
+          const result={analyzed,eligible_for_40_day_review:eligible40,signal_events:events.length,
+            latest_signal_subtypes:latestKinds,subtype_event_counts:subtypeCounts,
+            by_subtype:table('subtype'),by_main_kind:table('kind'),by_sample_breadth:table('regime'),
+            errors,fee_assumption:'0.3/0.5/0.7 percentage points per hypothetical round trip (fees, tax, slippage lumped)',
+            breadth_rule:'same-day equal-weight rising share of available sampled stocks, >=50 observed; not official KOSPI/KOSDAQ index',
+            chronological_rule:'for each stock last 40 signal opportunities split 20 earlier and 20 later, next bar outcome only; overlapping events',
+            passed:analyzed>=270&&eligible40>=250};
+          Object.assign(report,result);
+          fs.writeFileSync(file,JSON.stringify(report,null,2)+'\n');
+          const lines=['### 종배 V8.8.9.7 기타 유형·시장 상태·비용 연구 (읽기 전용)',
+            `- 데이터 확보: **${report.history_ready}/300** / 분석: **${analyzed}/300** / 40일 검증 가능: **${eligible40}/300**`,
+            `- 과거 신호: **${events.length}건** (종목·일자별 중복 및 상관관계 가능)`,
+            `- 최신 신호 세부 유형: ${JSON.stringify(latestKinds)}`,
+            `- 세부 유형별 신호 건수: ${JSON.stringify(subtypeCounts)}`,
+            `- 유형별 (익일 종가, 비용 0.5%p 차감): ${JSON.stringify(Object.fromEntries(Object.entries(report.by_subtype).map(([p,v])=>[p,Object.fromEntries(Object.entries(v).map(([k,z])=>[k,z.net_next_close_0_5]))])))}`,
+            `- 표본 상승비율별 (익일 종가, 비용 0.5%p 차감): ${JSON.stringify(Object.fromEntries(Object.entries(report.by_sample_breadth).map(([p,v])=>[p,Object.fromEntries(Object.entries(v).map(([k,z])=>[k,z.net_next_close_0_5]))])))}`,
+            `- 제외·오류: ${JSON.stringify(errors)}`,
+            '- 0.3/0.5/0.7%p 비용 시나리오는 Artifacts의 summary.json 참조',
+            '- 동일 표본 재탐색: 독립 검증 아님. 실제 KOSPI 등락 아닌 표본 내부 상승비율. 종가 체결·수익 보장 아님.',
+            '- NH 원시 시세/비밀키 공개 없음, 주문·계좌 접근·운영 사이트 변경 없음.'];
+          if(process.env.GITHUB_STEP_SUMMARY)fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY,lines.join('\n')+'\n');
+          console.log('AGGREGATE ONLY',JSON.stringify({analyzed,eligible40,events:events.length,errors}));
+          if(!result.passed)process.exitCode=1;
+          JS
+      - name: Remove ephemeral NH records
+        if: always()
+        run: rm -f /tmp/jongbe_v8897_private.ndjson
+      - name: Upload aggregate-only report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: jongbe-v8897-subtype-cost-${{ github.run_id }}
+          path: nh-v8897/summary.json
+          if-no-files-found: warn
+          retention-days: 7
