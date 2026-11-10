@@ -1,0 +1,288 @@
+name: Jongbe V8.8.9.5 NH 300-stock score and next-day backtest (read-only)
+
+on:
+  push:
+    branches: [v8.8.4-test]
+    paths:
+      - '.github/workflows/v8895-nh-300-score-backtest.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: jongbe-v8895-nh-300-score-readonly
+  cancel-in-progress: false
+
+jobs:
+  score-backtest-300:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      NHPLUG_APP_KEY: ${{ secrets.NAMUH_APP_KEY }}
+      NHPLUG_APP_SECRET: ${{ secrets.NAMUH_APP_SECRET_KEY }}
+      NHPLUG_BASE_URL: https://api.nhplug.com:8443
+      NHPLUG_AUTH_URL: https://api.nhplug.com:8443
+      NHPLUG_RATE_LIMIT: '2'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Install read-only NH client and KRX calendar
+        run: python -m pip install --disable-pip-version-check 'nhplug==0.4.1' 'exchange-calendars>=4.9,<5' pandas
+      - name: Read NH historical bars and audit scores without publishing quote data
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p nh-300-v8895
+          cat > /tmp/jongbe_v8895_extract.py <<'PY'
+          from collections import Counter
+          from datetime import datetime, date, timedelta, time as daytime
+          from pathlib import Path
+          from zoneinfo import ZoneInfo
+          import json, os, re, time
+          import exchange_calendars as ec
+          import pandas as pd
+          from nhplug import call
+
+          OUT=Path('nh-300-v8895/summary.json')
+          PRIVATE=Path('/tmp/jongbe_v8895_private.ndjson')
+          NOW=datetime.now(ZoneInfo('Asia/Seoul'))
+          cutoff=NOW.date() if NOW.time()>=daytime(16,30) else NOW.date()-timedelta(days=1)
+          closed={'2026-06-03','2026-07-17'}
+          sessions=ec.get_calendar('XKRX').sessions_in_range(pd.Timestamp(cutoff-timedelta(days=45)),pd.Timestamp(cutoff))
+          target=[s.date().isoformat() for s in sessions if s.date().isoformat() not in closed][-1]
+          if not os.getenv('NHPLUG_APP_KEY') or not os.getenv('NHPLUG_APP_SECRET'):
+              raise RuntimeError('Missing NH app credentials; secret values not displayed')
+          universe=json.loads(Path('results.json').read_text(encoding='utf-8'))
+          pools={'KOSPI':set(),'KOSDAQ':set()}
+          for row in universe.get('rows',[]):
+              market,code=row.get('market'),str(row.get('code',''))
+              if market in pools and re.fullmatch(r'\d{6}',code): pools[market].add(code)
+          if sum(map(len,pools.values()))<2000: raise RuntimeError('Stock universe incomplete')
+          anchors=[('KOSPI','005930'),('KOSPI','000660'),('KOSDAQ','328130')]
+          if any(code not in pools[m] for m,code in anchors): raise RuntimeError('Regression stock missing')
+          excluded={c for _,c in anchors}
+          def pick(m,n):
+              options=sorted(pools[m]-excluded)
+              if len(options)<n: raise RuntimeError('Insufficient stocks')
+              return [(m,options[i*(len(options)-1)//(n-1)]) for i in range(n)]
+          stocks=anchors+pick('KOSPI',148)+pick('KOSDAQ',149)
+          assert len(stocks)==300 and len({c for _,c in stocks})==300
+
+          def dateparse(value):
+              s=str(value or '').strip()
+              for fmt in ('%y/%m/%d','%Y-%m-%d','%Y%m%d','%Y/%m/%d','%y%m%d'):
+                  try:
+                      d=datetime.strptime(s,fmt).date()
+                      return d.isoformat() if date(2020,1,1)<=d<=date(2032,12,31) else None
+                  except ValueError: pass
+              return None
+
+          def number(value,positive=False):
+              if value is None or isinstance(value,bool): return None
+              s=str(value).strip().replace(',','')
+              if not re.fullmatch(r'\d{1,15}(?:\.\d{1,4})?',s): return None
+              n=float(s)
+              return n if (n>0 if positive else n>=0) else None
+
+          counts=Counter()
+          PRIVATE.parent.mkdir(exist_ok=True)
+          with PRIVATE.open('w',encoding='utf-8') as private:
+              os.chmod(PRIVATE,0o600)
+              for i,(market,code) in enumerate(stocks,1):
+                  status='request_failed'
+                  try:
+                      response=call('/krstock/quote/v1/currentDaily',{
+                          'market_cd':'KRX','iem_cd':code,'array_cnt':'452','view_main_yn':'Y'})
+                      raw=response.get('Output_0') if isinstance(response,dict) else None
+                      if isinstance(raw,dict): raw=[raw]
+                      if not isinstance(raw,list) or not raw:
+                          status='missing_rows'
+                      else:
+                          dated={}; conflict=False
+                          for item in raw:
+                              if not isinstance(item,dict): continue
+                              d=dateparse(item.get('bsop_date'))
+                              if not d or d>target: continue
+                              o=number(item.get('stck_oprc'),True)
+                              h=number(item.get('stck_hgpr'),True)
+                              l=number(item.get('stck_lwpr'),True)
+                              c=number(item.get('stck_clpr'),True)
+                              v=number(item.get('acml_vol'))
+                              if None in (o,h,l,c,v) or not(l<=min(o,c) and max(o,c)<=h):continue
+                              bar=[d,o,h,l,c,v]
+                              if d in dated and dated[d]!=bar:conflict=True
+                              dated[d]=bar
+                          days=sorted(dated)
+                          if conflict:status='duplicate_conflict'
+                          elif not days:status='no_valid_bars'
+                          elif days[-1]!=target:status='stale_session'
+                          elif len(days)<200:status='insufficient_200_days'
+                          else:
+                              # Retain all available historical records (up to 452); only in ephemeral runner.
+                              private.write(json.dumps({'code':code,'market':market,'bars':[dated[d] for d in days]})+'\n')
+                              status='ready'
+                  except Exception:
+                      status='request_failed' # Never log raw API errors; may include sensitive content.
+                  counts[status]+=1
+                  if i%25==0:
+                      print(f'Stock {i}/300, history ready={counts["ready"]}, other={i-counts["ready"]}',flush=True)
+                  time.sleep(.7)
+          summary={
+           'schema':'jongbe-v8895-300-score-backtest-v1',
+           'checked_at_kst':NOW.isoformat(timespec='seconds'),
+           'target_completed_krx_date':target,
+           'universe_asof':universe.get('asof'),
+           'attempted':300,'history_ready_200':counts['ready'],
+           'data_status_counts':dict(sorted(counts.items())),
+           'scoring_formula':'experimental_v1_not_production_score',
+           'test_scope':'Last 20 historical signal dates with observed next session; each decision uses only data through that date.',
+           'website_modified':False,'accounts_or_orders_used':False,
+           'provider_quotes_in_artifact':False,
+          }
+          OUT.write_text(json.dumps(summary,ensure_ascii=False,indent=2)+'\n',encoding='utf-8')
+          PY
+          python /tmp/jongbe_v8895_extract.py
+          node <<'JS'
+          const fs=require('node:fs');
+          const engine=require(process.cwd()+'/v88/v88-engine.js');
+          const reportFile='nh-300-v8895/summary.json';
+          const report=JSON.parse(fs.readFileSync(reportFile,'utf8'));
+          const raw=fs.readFileSync('/tmp/jongbe_v8895_private.ndjson','utf8').trim();
+          const rows=raw?raw.split('\n').map(JSON.parse):[];
+          const failures={}, latestRisk={}, latestSignals={}, bands={};
+          const events=[], scoreBands={'0-39':[],'40-59':[],'60-79':[],'80-100':[]};
+          let analyzed=0, maReady=0, latestSignaled=0, historyEligible=0;
+          const add=(obj,k)=>obj[k]=(obj[k]||0)+1;
+          const mean=xs=>xs.length?xs.reduce((a,b)=>a+b,0)/xs.length:null;
+          // Transparent experimental score. Not trained/probabilistic and not the production score.
+          function scoreFor(prefix,result){
+            const n=prefix.length,t=n-1,closes=prefix.map(x=>x[4]);
+            const ma5=engine.rolling(closes,5).at(-1);
+            const ma20=engine.rolling(closes,20).at(-1);
+            const ma200=engine.rolling(closes,200).at(-1);
+            if(![ma5,ma20,ma200].every(Number.isFinite))return null;
+            const close=closes[t], vols=prefix.slice(-21,-1).map(x=>x[5]);
+            const priorAvg=mean(vols),vr=priorAvg>0?prefix[t][5]/priorAvg:null;
+            const prev20=prefix.slice(-21,-1).map(x=>x[4]*x[5]);
+            const turnover=mean(prev20); // approximate KRW value, not provider turnover field
+            const bullish=result.signals.filter(s=>!['black_soldiers','cloud_failed'].includes(s));
+            let points=0;
+            points+=close>ma5?10:0;
+            points+=close>ma20?12:0;
+            points+=close>ma200?12:0;
+            points+=ma5>ma20?10:0;
+            points+=ma20>ma200?10:0;
+            points+=vr!==null&&vr>=1.5?12:(vr!==null&&vr>=1.1?6:0);
+            points+=Number.isFinite(turnover)&&turnover>=50000000000?10:(Number.isFinite(turnover)&&turnover>=20000000000?5:0);
+            points+=bullish.length?14:0;
+            points+=result.risk==='signal'?10:0;
+            if(result.risk==='danger')points=Math.min(points,39);
+            const score=Math.max(0,Math.min(100,points));
+            return {score,vr,turnover};
+          }
+          const getBand=s=>s<40?'0-39':s<60?'40-59':s<80?'60-79':'80-100';
+          for(const row of rows){
+            try{
+              const bars=row.bars;
+              if(bars.length<200)throw Error('under_200');
+              if(bars.at(-1)[0]!==report.target_completed_krx_date)throw Error('stale_date');
+              const latestBars=bars.slice(-200);
+              const latest=engine.analyze(latestBars);
+              if(!latest.ready||latest.bars.length!==200)throw Error('engine_not_ready');
+              const ma=engine.rolling(latestBars.map(b=>b[4]),200).at(-1);
+              if(!Number.isFinite(ma))throw Error('ma_invalid');
+              const b=latest.bars.length-1;
+              if(![latest.bb?.upper?.[b],latest.bb?.lower?.[b],latest.cloud?.ceiling?.[b]].every(Number.isFinite))throw Error('indicator_invalid');
+              analyzed++;maReady++;
+              add(latestRisk,latest.risk);
+              for(const s of latest.signals)add(latestSignals,s);
+              const scored=scoreFor(latestBars,latest);
+              if(scored===null)throw Error('score_invalid');
+              add(bands,getBand(scored.score));
+              if(latest.risk==='signal')latestSignaled++;
+              // Historical signal at index i uses dates <= i. Outcome uses only i+1.
+              // One stock contributes at most 20 event dates. Do not count latest day as outcome.
+              const first=Math.max(199,bars.length-21);
+              for(let i=first;i<bars.length-1;i++){
+                const prefix=bars.slice(i-199,i+1);
+                const prior=engine.analyze(prefix);
+                if(!prior.ready)continue;
+                const p=scoreFor(prefix,prior);
+                if(p===null)continue;
+                historyEligible++;
+                if(prior.risk!=='signal')continue;
+                const base=prefix.at(-1)[4], next=bars[i+1];
+                if(!(base>0&&next[1]>0&&next[4]>0))continue;
+                // Percent returns with a hypothetical close entry, exclude fees/slippage.
+                const event={date:prefix.at(-1)[0],openPct:(next[1]/base-1)*100,
+                   closePct:(next[4]/base-1)*100, score:p.score, signals:prior.signals};
+                events.push(event);
+                scoreBands[getBand(p.score)].push(event);
+              }
+            }catch(e){
+              const k=['under_200','stale_date','engine_not_ready','ma_invalid','indicator_invalid','score_invalid'].includes(e.message)?e.message:'engine_exception';
+              add(failures,k);
+            }
+          }
+          function stats(group,key){
+            const vals=group.map(x=>x[key]).filter(Number.isFinite);
+            const m=mean(vals);
+            return {count:vals.length,average_pct:m===null?null:+m.toFixed(4),positive_pct:vals.length?+(vals.filter(x=>x>0).length*100/vals.length).toFixed(2):null};
+          }
+          const byBand={};for(const [key,values] of Object.entries(scoreBands)){
+            byBand[key]={events:values.length,next_open:stats(values,'openPct'),next_close:stats(values,'closePct')};
+          }
+          const bySignal={};
+          for(const s of [...new Set(events.flatMap(e=>e.signals))]){
+            const subset=events.filter(e=>e.signals.includes(s));
+            bySignal[s]={events:subset.length,next_close:stats(subset,'closePct')};
+          }
+          Object.assign(report,{
+           analyzed_with_existing_engine:analyzed,ma200_ready:maReady,scored:analyzed,
+           latest_signal_stocks:latestSignaled,latest_risk_counts:latestRisk,
+           latest_signal_counts:latestSignals,latest_score_distribution:bands,
+           historical_candidate_days_checked:historyEligible,
+           backtest_signal_events:events.length,
+           backtest_all:{next_open:stats(events,'openPct'),next_close:stats(events,'closePct')},
+           backtest_by_score_band:byBand,backtest_by_signal:bySignal,
+           engine_errors:failures,
+           leakage_rule:'Signal at T is computed only with <=T bars; outcome uses actual T+1 OHLC.',
+           fee_slippage_assumption:'0% (gross only); no claim of executable close fill',
+           statistical_limits:'Overlapping events; selected historical universe; no causal or profitability guarantee.',
+           test_passed:analyzed>=270&&analyzed===report.history_ready_200&&Object.keys(failures).length===0
+          });
+          fs.writeFileSync(reportFile,JSON.stringify(report,null,2)+'\n');
+          const output=[
+           '### 종배 V8.8.9.5 300종목 점수·다음 거래일 백테스트 (읽기 전용)',
+           `- 최근 확정 거래일: ${report.target_completed_krx_date}`,
+           `- 200일 데이터: **${report.history_ready_200}/300** / 분석·점수: **${analyzed}/300**`,
+           `- 최신 신호 종목: **${latestSignaled}** / 위험 분류: ${JSON.stringify(latestRisk)}`,
+           `- 시험용 점수 구간별 종목 수: ${JSON.stringify(bands)}`,
+           `- 과거 신호 이벤트(중복 날짜/종목 가능): **${events.length}**`,
+           `- 익일 시가 수익률(총수익, 비용 제외): ${JSON.stringify(report.backtest_all.next_open)}`,
+           `- 익일 종가 수익률(총수익, 비용 제외): ${JSON.stringify(report.backtest_all.next_close)}`,
+           `- 점수 구간별 익일 종가: ${JSON.stringify(byBand)}`,
+           `- 오류: ${JSON.stringify(failures)}`,
+           '- 주의: 시험용 점수이며 42개 최신 신호를 그대로 재현한다는 보장은 없음. 미래 데이터 누수 방지; 계좌·주문·운영 사이트 변경 없음.'
+          ].join('\n')+'\n';
+          if(process.env.GITHUB_STEP_SUMMARY)fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY,output);
+          console.log('AGGREGATE ONLY:',JSON.stringify({analyzed,events:events.length,errors:failures}));
+          if(!report.test_passed)process.exitCode=1;
+          JS
+      - name: Remove temporary licensed bars
+        if: always()
+        run: rm -f /tmp/jongbe_v8895_private.ndjson
+      - name: Upload safe aggregate report only
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: jongbe-v8895-score-backtest-${{ github.run_id }}
+          path: nh-300-v8895/summary.json
+          if-no-files-found: warn
+          retention-days: 7
