@@ -15,7 +15,7 @@ on:
       batch_count:
         description: 'How many consecutive batches? 2 for first test; 25 for all 2497 (very long)'
         required: true
-        default: '2'
+        default: '3'
         type: string
 
 permissions:
