@@ -1,0 +1,225 @@
+name: Jongbe V8.8.9.4 NH 300-stock engine bridge (read-only)
+
+on:
+  push:
+    branches: [v8.8.4-test]
+    paths:
+      - '.github/workflows/v8894-nh-300-engine-bridge.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: jongbe-v8894-nh-300-engine-readonly
+  cancel-in-progress: false
+
+jobs:
+  bridge-300:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      NHPLUG_APP_KEY: ${{ secrets.NAMUH_APP_KEY }}
+      NHPLUG_APP_SECRET: ${{ secrets.NAMUH_APP_SECRET_KEY }}
+      NHPLUG_BASE_URL: https://api.nhplug.com:8443
+      NHPLUG_AUTH_URL: https://api.nhplug.com:8443
+      NHPLUG_RATE_LIMIT: '2'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Install read-only NH client and KRX calendar
+        run: python -m pip install --disable-pip-version-check 'nhplug==0.4.1' 'exchange-calendars>=4.9,<5' pandas
+      - name: Validate latest completed daily bars and run unchanged V8.8 signals
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p nh-300-engine-report
+          cat > /tmp/jongbe_300_bridge.py <<'PY'
+          from collections import Counter
+          from datetime import date, datetime, timedelta, time as daytime
+          from pathlib import Path
+          from zoneinfo import ZoneInfo
+          import json, os, re, time
+          import exchange_calendars as ec
+          import pandas as pd
+          from nhplug import call
+
+          SIZE = 300
+          NOW = datetime.now(ZoneInfo('Asia/Seoul'))
+          cutoff = NOW.date() if NOW.time() >= daytime(16,30) else NOW.date()-timedelta(days=1)
+          CLOSED = {'2026-06-03', '2026-07-17'}
+          sessions = ec.get_calendar('XKRX').sessions_in_range(
+              pd.Timestamp(cutoff-timedelta(days=45)),pd.Timestamp(cutoff))
+          candidates = [d.date().isoformat() for d in sessions
+                        if d.date().isoformat() not in CLOSED]
+          if not candidates: raise RuntimeError('No completed KRX session')
+          target = candidates[-1]
+          if not os.getenv('NHPLUG_APP_KEY') or not os.getenv('NHPLUG_APP_SECRET'):
+              raise RuntimeError('NH secrets missing (credentials never logged)')
+          universe = json.loads(Path('results.json').read_text(encoding='utf-8'))
+          pools = {'KOSPI': set(), 'KOSDAQ': set()}
+          for row in universe.get('rows', []):
+              market,code = row.get('market'),str(row.get('code',''))
+              if market in pools and re.fullmatch(r'\d{6}',code): pools[market].add(code)
+          if sum(map(len,pools.values()))<2000: raise RuntimeError('Universe incomplete')
+          anchors=[('KOSPI','005930'),('KOSPI','000660'),('KOSDAQ','328130')]
+          if any(code not in pools[market] for market,code in anchors):
+              raise RuntimeError('Regression ticker missing')
+          exclude={code for _,code in anchors}
+          def sample(market,n):
+              options=sorted(pools[market]-exclude)
+              if len(options)<n: raise RuntimeError('Not enough securities')
+              return [(market,options[i*(len(options)-1)//(n-1)]) for i in range(n)]
+          stocks=anchors+sample('KOSPI',148)+sample('KOSDAQ',149)
+          assert len(stocks)==SIZE and len({c for _,c in stocks})==SIZE
+
+          def dayparse(value):
+              s=str(value or '').strip()
+              for fmt in ('%y/%m/%d','%Y-%m-%d','%Y%m%d','%Y/%m/%d','%y%m%d'):
+                  try:
+                      d=datetime.strptime(s,fmt).date()
+                      return d.isoformat() if date(2020,1,1)<=d<=date(2032,12,31) else None
+                  except ValueError: pass
+              return None
+          def number(value,positive=False):
+              if value is None or isinstance(value,bool): return None
+              s=str(value).strip().replace(',','')
+              if not re.fullmatch(r'\d{1,15}(?:\.\d{1,4})?',s): return None
+              n=float(s)
+              return n if (n>0 if positive else n>=0) else None
+          counts=Counter()
+          batches=[]
+          # Ephemeral, never uploaded. Each accepted record contains 200 validated bars.
+          with open('/tmp/jongbe_300_private_bars.ndjson','w',encoding='utf-8') as private:
+              os.chmod('/tmp/jongbe_300_private_bars.ndjson',0o600)
+              for batch in range(3):
+                  group=stocks[batch*100:(batch+1)*100]
+                  local=Counter()
+                  for idx,(market,code) in enumerate(group,1):
+                      status='request_failed'
+                      try:
+                          response=call('/krstock/quote/v1/currentDaily',{
+                              'market_cd':'KRX','iem_cd':code,
+                              'array_cnt':'452','view_main_yn':'Y'})
+                          raw=response.get('Output_0') if isinstance(response,dict) else None
+                          if isinstance(raw,dict): raw=[raw]
+                          if not isinstance(raw,list) or not raw:
+                              status='missing_rows'
+                          else:
+                              by_date={}; conflict=False
+                              for item in raw:
+                                  if not isinstance(item,dict): continue
+                                  day=dayparse(item.get('bsop_date'))
+                                  if not day or day>target: continue
+                                  o=number(item.get('stck_oprc'),True)
+                                  h=number(item.get('stck_hgpr'),True)
+                                  l=number(item.get('stck_lwpr'),True)
+                                  c=number(item.get('stck_clpr'),True)
+                                  v=number(item.get('acml_vol'))
+                                  if None in (o,h,l,c,v) or not(l<=min(o,c) and max(o,c)<=h): continue
+                                  bar=[day,o,h,l,c,v]
+                                  if day in by_date and by_date[day]!=bar: conflict=True
+                                  by_date[day]=bar
+                              days=sorted(by_date)
+                              if conflict: status='duplicate_conflict'
+                              elif not days: status='no_valid_bars'
+                              elif days[-1]!=target: status='stale_session'
+                              elif len(days)<200: status='fewer_than_200_valid_days'
+                              else:
+                                  # Exact 200 chronologically ordered valid bars, no 452-day requirement.
+                                  bars=[by_date[d] for d in days[-200:]]
+                                  private.write(json.dumps({'code':code,'market':market,'bars':bars})+'\n')
+                                  status='ready_200'
+                      except Exception:
+                          # Never log provider errors, headers, raw replies or secrets.
+                          status='request_failed'
+                      counts[status]+=1; local[status]+=1
+                      if idx%25==0:
+                          print(f'Batch {batch+1}/3, {idx}/100; ready={local["ready_200"]}; other={idx-local["ready_200"]}',flush=True)
+                      time.sleep(.7)
+                  batches.append({'batch':batch+1,'attempted':100,'ready_200':local['ready_200'],
+                                  'status_counts':dict(sorted(local.items()))})
+          summary={
+              'schema':'jongbe-v8894-nh-300-engine-bridge-v1',
+              'checked_at_kst':NOW.isoformat(timespec='seconds'),
+              'target_completed_krx_date':target,
+              'universe_asof':universe.get('asof'),
+              'attempted':SIZE,'history_ready_200':counts['ready_200'],
+              'history_status_counts':dict(sorted(counts.items())),
+              'batches':batches,'uses_orders_or_accounts':False,
+              'site_changed':False,'licensed_ohlcv_in_artifact':False,
+              'note':'Historical engine check only; signals are not buy advice or a live public quote service.'}
+          Path('nh-300-engine-report/summary.json').write_text(
+              json.dumps(summary,ensure_ascii=False,indent=2)+'\n',encoding='utf-8')
+          print('PRIVATE 200-BAR COVERAGE:',counts['ready_200'],'/',SIZE,flush=True)
+          PY
+          python /tmp/jongbe_300_bridge.py
+          node <<'JS'
+          const fs=require('node:fs');
+          const engine=require(process.cwd()+'/v88/v88-engine.js');
+          const file='nh-300-engine-report/summary.json';
+          const summary=JSON.parse(fs.readFileSync(file,'utf8'));
+          const rows=fs.readFileSync('/tmp/jongbe_300_private_bars.ndjson','utf8').trim();
+          const signals={}, risks={}, errors={};
+          let analyzed=0, ma200Ready=0;
+          for(const row of rows?rows.split('\n').map(JSON.parse):[]){
+            try {
+              const bars=row.bars;
+              if(bars.length!==200) throw Error('invalid_bar_count');
+              const closes=bars.map(b=>b[4]);
+              const ma5=engine.rolling(closes,5).at(-1);
+              const ma20=engine.rolling(closes,20).at(-1);
+              const ma200=engine.rolling(closes,200).at(-1);
+              if(![ma5,ma20,ma200].every(Number.isFinite)) throw Error('invalid_moving_average');
+              ma200Ready++;
+              const result=engine.analyze(bars);
+              if(!result.ready || result.bars.length!==200) throw Error('engine_not_ready');
+              const last=result.bars.length-1;
+              if(![result.bb?.upper?.[last],result.bb?.middle?.[last],result.bb?.lower?.[last],
+                    result.cloud?.ceiling?.[last],result.cloud?.floor?.[last]].every(Number.isFinite))
+                throw Error('indicator_missing');
+              analyzed++;
+              risks[result.risk]=(risks[result.risk]||0)+1;
+              for(const s of result.signals) signals[s]=(signals[s]||0)+1;
+            } catch(e) {
+              const kind=['invalid_bar_count','invalid_moving_average','engine_not_ready','indicator_missing'].includes(e.message)
+                ?e.message:'engine_exception';
+              errors[kind]=(errors[kind]||0)+1;
+            }
+          }
+          Object.assign(summary,{moving_average_200_ready:ma200Ready,
+              analyzed_with_unchanged_v88_engine:analyzed,
+              signal_counts:signals,risk_counts:risks,engine_errors:errors,
+              engine_passed:analyzed>=270 && analyzed===summary.history_ready_200 && Object.keys(errors).length===0});
+          fs.writeFileSync(file,JSON.stringify(summary,null,2)+'\n');
+          const body=[
+            '### 종배 V8.8.9.4 300종목 분석 엔진 검증 (읽기 전용)',
+            `- 확정 거래일: ${summary.target_completed_krx_date}`,
+            `- 200일 유효 일봉: **${summary.history_ready_200}/300**`,
+            `- 5·20·200일선 계산: **${ma200Ready}/300**`,
+            `- 기존 V8.8 엔진 분석: **${analyzed}/300**`,
+            `- 매수조건 신호 수: ${JSON.stringify(signals)}`,
+            `- 위험 분류: ${JSON.stringify(risks)}`,
+            `- 분석 오류: ${JSON.stringify(errors)}`,
+            '- 시세/계좌/주문/비밀키 공개 없음; 운영 사이트 변경 없음',
+          ].join('\n')+'\n';
+          if(process.env.GITHUB_STEP_SUMMARY)fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY,body);
+          console.log('BRIDGE COUNTS:',JSON.stringify({history:summary.history_ready_200,ma200Ready,analyzed,errors}));
+          if(!summary.engine_passed) process.exitCode=1;
+          JS
+      - name: Remove temporary licensed bars
+        if: always()
+        run: rm -f /tmp/jongbe_300_private_bars.ndjson
+      - name: Upload aggregate counts only
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: jongbe-v8894-300-bridge-${{ github.run_id }}
+          path: nh-300-engine-report/summary.json
+          if-no-files-found: warn
+          retention-days: 7
