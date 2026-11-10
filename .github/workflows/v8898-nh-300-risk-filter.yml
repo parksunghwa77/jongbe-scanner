@@ -1,0 +1,243 @@
+name: Jongbe V8.8.9.8 NH 300-stock risk filter audit (read-only)
+
+on:
+  push:
+    branches: [v8.8.4-test]
+    paths:
+      - '.github/workflows/v8898-nh-300-risk-filter.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: jongbe-v8898-nh-risk-readonly
+  cancel-in-progress: false
+
+jobs:
+  risk-filter-300:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      NHPLUG_APP_KEY: ${{ secrets.NAMUH_APP_KEY }}
+      NHPLUG_APP_SECRET: ${{ secrets.NAMUH_APP_SECRET_KEY }}
+      NHPLUG_BASE_URL: https://api.nhplug.com:8443
+      NHPLUG_AUTH_URL: https://api.nhplug.com:8443
+      NHPLUG_RATE_LIMIT: '2'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Install read-only NH client and calendar
+        run: python -m pip install --disable-pip-version-check 'nhplug==0.4.1' 'exchange-calendars>=4.9,<5' pandas
+      - name: Evaluate predeclared risk filters and no-trade policy
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p nh-v8898
+          trap 'rm -f /tmp/jongbe_v8898_private.ndjson' EXIT
+          python - <<'PY'
+          from collections import Counter
+          from datetime import datetime, date, timedelta, time as daytime
+          from pathlib import Path
+          from zoneinfo import ZoneInfo
+          import json, os, re, time
+          import exchange_calendars as ec
+          import pandas as pd
+          from nhplug import call
+
+          NOW=datetime.now(ZoneInfo('Asia/Seoul'))
+          cutoff=NOW.date() if NOW.time()>=daytime(16,30) else NOW.date()-timedelta(days=1)
+          closed={'2026-06-03','2026-07-17'}
+          sessions=ec.get_calendar('XKRX').sessions_in_range(pd.Timestamp(cutoff-timedelta(days=45)),pd.Timestamp(cutoff))
+          valid=[x.date().isoformat() for x in sessions if x.date().isoformat() not in closed]
+          if not valid: raise RuntimeError('No completed trading session')
+          target=valid[-1]
+          if not os.getenv('NHPLUG_APP_KEY') or not os.getenv('NHPLUG_APP_SECRET'):
+              raise RuntimeError('Missing credentials; keys never printed')
+          universe=json.loads(Path('results.json').read_text(encoding='utf8'))
+          pools={'KOSPI':set(),'KOSDAQ':set()}
+          for row in universe.get('rows',[]):
+              market,code=row.get('market'),str(row.get('code',''))
+              if market in pools and re.fullmatch(r'\d{6}',code): pools[market].add(code)
+          if sum(map(len,pools.values()))<2000: raise RuntimeError('Incomplete source universe')
+          anchors=[('KOSPI','005930'),('KOSPI','000660'),('KOSDAQ','328130')]
+          if any(c not in pools[m] for m,c in anchors): raise RuntimeError('Anchor not in universe')
+          excluded={c for _,c in anchors}
+          def sample(m,n):
+              xs=sorted(pools[m]-excluded)
+              if len(xs)<n: raise RuntimeError('Insufficient source universe')
+              return [(m,xs[i*(len(xs)-1)//(n-1)]) for i in range(n)]
+          selected=anchors+sample('KOSPI',148)+sample('KOSDAQ',149)
+          assert len(selected)==300 and len({c for _,c in selected})==300
+          def parse_date(v):
+              for fmt in ('%y/%m/%d','%Y-%m-%d','%Y%m%d','%Y/%m/%d','%y%m%d'):
+                  try:
+                      d=datetime.strptime(str(v or '').strip(),fmt).date()
+                      return d.isoformat() if date(2020,1,1)<=d<=date(2032,12,31) else None
+                  except ValueError: pass
+              return None
+          def num(v,positive=False):
+              if v is None or isinstance(v,bool): return None
+              s=str(v).strip().replace(',','')
+              if not re.fullmatch(r'\d{1,15}(?:\.\d{1,4})?',s): return None
+              n=float(s)
+              return n if (n>0 if positive else n>=0) else None
+          stats=Counter()
+          with open('/tmp/jongbe_v8898_private.ndjson','w',encoding='utf8') as private:
+              os.chmod('/tmp/jongbe_v8898_private.ndjson',0o600)
+              for i,(market,code) in enumerate(selected,1):
+                  reason='request_failed'
+                  try:
+                      res=call('/krstock/quote/v1/currentDaily',{'market_cd':'KRX','iem_cd':code,'array_cnt':'452','view_main_yn':'Y'})
+                      raw=res.get('Output_0') if isinstance(res,dict) else None
+                      if isinstance(raw,dict): raw=[raw]
+                      if not isinstance(raw,list) or not raw: reason='missing_rows'
+                      else:
+                          dated={};conflict=False
+                          for r in raw:
+                              if not isinstance(r,dict): continue
+                              d=parse_date(r.get('bsop_date'))
+                              if not d or d>target: continue
+                              o=num(r.get('stck_oprc'),True);h=num(r.get('stck_hgpr'),True)
+                              l=num(r.get('stck_lwpr'),True);c=num(r.get('stck_clpr'),True)
+                              v=num(r.get('acml_vol'))
+                              if None in (o,h,l,c,v) or not l<=min(o,c)<=max(o,c)<=h: continue
+                              bar=[d,o,h,l,c,v]
+                              if d in dated and dated[d]!=bar: conflict=True
+                              dated[d]=bar
+                          days=sorted(dated)
+                          if conflict: reason='duplicate_conflict'
+                          elif not days: reason='no_valid_bars'
+                          elif days[-1]!=target: reason='stale_session'
+                          elif len(days)<200: reason='under_200'
+                          else:
+                              private.write(json.dumps({'code':code,'market':market,'bars':[dated[d] for d in days]})+'\n')
+                              reason='ready'
+                  except Exception:
+                      reason='request_failed' # No provider error details in logs.
+                  stats[reason]+=1
+                  if i%25==0: print(f'History {i}/300; ready={stats["ready"]}',flush=True)
+                  time.sleep(.7)
+          report={'schema':'jongbe-v8898-risk-filter-v1','target_date':target,
+            'sample_size':300,'history_ready':stats['ready'],'data_status':dict(sorted(stats.items())),
+            'selection':'fixed sampled current universe; survivorship and selection bias possible',
+            'website_modified':False,'accounts_or_orders_used':False,'quotes_exported':False,
+            'cost_assumption_pct_points':0.5,'not_independent_validation':True}
+          Path('nh-v8898/summary.json').write_text(json.dumps(report,ensure_ascii=False,indent=2)+'\n',encoding='utf8')
+          PY
+          node <<'JS'
+          const fs=require('node:fs');
+          const engine=require(process.cwd()+'/v88/v88-engine.js');
+          const path='nh-v8898/summary.json',report=JSON.parse(fs.readFileSync(path,'utf8'));
+          const data=fs.readFileSync('/tmp/jongbe_v8898_private.ndjson','utf8').trim();
+          const stocks=data?data.split('\n').map(JSON.parse):[];
+          const stats=(a)=>{
+            const n=a.length,mean=n?a.reduce((s,x)=>s+x,0)/n:null;
+            return {n,avg_net_pct:mean===null?null:+mean.toFixed(4),positive_pct:n?+(100*a.filter(x=>x>0).length/n).toFixed(2):null};
+          };
+          const bump=(o,k)=>o[k]=(o[k]||0)+1;
+          const group=()=>({baseline:[],filtered:[],bb_reentry:[],trend_breakout:[]});
+          const cohorts={earlier:group(),later:group()};
+          const latest={baseline_signal:0,pass_filter:0,blocked:{}};
+          const failures={};let analyzed=0,eligible40=0;
+          // Fixed research rules. Do not fit thresholds to observed outcomes.
+          function filter(b,r){
+            const cls=b.map(x=>x[4]),c=cls.at(-1),p=cls.at(-2);
+            const ma5=engine.rolling(cls,5).at(-1),ma20=engine.rolling(cls,20).at(-1);
+            const vols=b.slice(-21,-1).map(x=>x[5]);
+            const avg=vols.reduce((a,x)=>a+x,0)/vols.length;
+            const vr=avg>0?b.at(-1)[5]/avg:null;
+            const dist20=ma20>0?c/ma20-1:Infinity;
+            const bb=r.signals.includes('bb_reentry');
+            const trend=r.signals.some(s=>['bb_breakout_volume','bb_squeeze_breakout','cloud_breakout'].includes(s));
+            if(r.risk!=='signal')return {pass:false,reason:'not_positive_signal'};
+            if(![ma5,ma20,vr,dist20].every(Number.isFinite))return {pass:false,reason:'insufficient_indicator'};
+            if(vr>3.0||dist20>0.08||dist20< -0.08)return {pass:false,reason:'overheated_or_far_from_ma20'};
+            if(bb){
+              // Re-entry: volume not too thin or climactic, price near 20-day line.
+              if(vr>=0.8&&vr<=2.0&&c>=ma20*0.94&&c<=ma20*1.04)
+                return {pass:true,reason:'bb_reentry'};
+              return {pass:false,reason:'bb_reentry_quality_filter'};
+            }
+            if(trend){
+              // Trend: avoid extended breakouts; require 5/20 confirmation and volume.
+              if(c>=ma5&&ma5>=ma20&&dist20<=0.05&&vr>=1.1&&vr<=2.3)
+                return {pass:true,reason:'trend_breakout'};
+              return {pass:false,reason:'trend_quality_filter'};
+            }
+            return {pass:false,reason:'other_signal_not_validated'};
+          }
+          for(const stock of stocks){
+            try{
+              const bars=stock.bars;
+              const current=engine.analyze(bars.slice(-200));
+              if(!current.ready)throw Error('engine_not_ready');
+              analyzed++;
+              const today=filter(bars.slice(-200),current);
+              if(current.risk==='signal'){
+                latest.baseline_signal++;
+                if(today.pass)latest.pass_filter++;
+                else bump(latest.blocked,today.reason);
+              }
+              if(bars.length<241){bump(failures,'under_241');continue;}
+              eligible40++;
+              const start=bars.length-41;
+              for(let i=start;i<bars.length-1;i++){
+                const prefix=bars.slice(i-199,i+1),r=engine.analyze(prefix);
+                if(!r.ready||r.risk!=='signal')continue;
+                const result=filter(prefix,r),next=bars[i+1],entry=prefix.at(-1)[4];
+                if(!(entry>0&&next[4]>0))continue;
+                const net=100*(next[4]/entry-1)-0.5;
+                const key=(i-start)<20?'earlier':'later';
+                cohorts[key].baseline.push(net);
+                if(result.pass){
+                  cohorts[key].filtered.push(net);
+                  cohorts[key][result.reason].push(net);
+                }
+              }
+            }catch(e){bump(failures,e.message==='engine_not_ready'?e.message:'engine_exception');}
+          }
+          const performance=Object.fromEntries(Object.entries(cohorts).map(([k,g])=>[k,
+            Object.fromEntries(Object.entries(g).map(([type,values])=>[type,stats(values)]))]));
+          // No-trade gate: never use this in production; historical performance is exploratory.
+          // Require >=30 later-period events, >0 average after assumed costs,
+          // and >50% positive trades. A zero-candidate day is always no trade.
+          const later=performance.later.filtered;
+          const gate=latest.pass_filter===0?'NO_TRADE_NO_CANDIDATES':
+            later.n<30?'NO_TRADE_INSUFFICIENT_EVIDENCE':
+            later.avg_net_pct<=0||later.positive_pct<=50?'NO_TRADE_NO_POSITIVE_EDGE':
+            'RESEARCH_ONLY_CONDITIONS_MET_NOT_A_TRADE_RECOMMENDATION';
+          Object.assign(report,{analyzed,eligible_40_day:eligible40,latest,
+            backtest:performance,errors:failures,decision:gate,
+            policy:'This is a research gate only. No simulated or real orders and no trading recommendation.',
+            caveats:['Same sample and period reused after prior research; not an untouched holdout',
+                     'Hypothetical end-of-day entry; 0.5 percentage point assumed cost',
+                     'Events across stocks/dates may overlap; no portfolio level risk estimate'],
+            diagnostic_passed:analyzed>=270&&eligible40>=250});
+          fs.writeFileSync(path,JSON.stringify(report,null,2)+'\n');
+          const lines=['### 종배 V8.8.9.8 위험 신호 필터 검증 (읽기 전용)',
+            `- 데이터 확보 ${report.history_ready}/300 · 엔진 분석 ${analyzed}/300 · 과거 40일 ${eligible40}/300`,
+            `- 최신 원래 신호: ${latest.baseline_signal}개 / 위험 필터 통과: ${latest.pass_filter}개`,
+            `- 통과하지 못한 사유: ${JSON.stringify(latest.blocked)}`,
+            `- 전반 20일 기준/필터: ${JSON.stringify(performance.earlier)}`,
+            `- 후반 20일 기준/필터: ${JSON.stringify(performance.later)}`,
+            `- **오늘 판정(연구용): ${gate.startsWith('NO_TRADE')?'오늘은 종배 쉬기':'연구 조건 충족 — 실거래 권고 아님'}** (${gate})`,
+            `- 오류·제외: ${JSON.stringify(failures)}`,
+            '- 거래비용 0.5%p 가정, 매수일 종가 체결 가정, 독립검증 아님. 운영 사이트·계좌·주문 변경 없음.'];
+          if(process.env.GITHUB_STEP_SUMMARY)fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY,lines.join('\n')+'\n');
+          console.log('AGGREGATE:',JSON.stringify({analyzed,eligible40,latest,decision:gate}));
+          if(!report.diagnostic_passed)process.exitCode=1;
+          JS
+      - name: Upload aggregate-only report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: jongbe-v8898-risk-filter-${{ github.run_id }}
+          path: nh-v8898/summary.json
+          if-no-files-found: warn
+          retention-days: 7
