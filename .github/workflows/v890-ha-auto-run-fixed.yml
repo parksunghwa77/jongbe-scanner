@@ -1,0 +1,77 @@
+name: Jongbe V8.9 HA 300 automatic audit (test branch only) - fixed
+
+on:
+  push:
+    branches: [v8.8.4-test]
+    paths:
+      - '.github/workflows/v890-ha-auto-run-fixed.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: jongbe-v890-ha-auto-audit-fixed
+  cancel-in-progress: false
+
+jobs:
+  automatic-ha-audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    env:
+      NHPLUG_APP_KEY: ${{ secrets.NAMUH_APP_KEY }}
+      NHPLUG_APP_SECRET: ${{ secrets.NAMUH_APP_SECRET_KEY }}
+      NHPLUG_BASE_URL: https://api.nhplug.com:8443
+      NHPLUG_AUTH_URL: https://api.nhplug.com:8443
+      NHPLUG_RATE_LIMIT: '2'
+    steps:
+      - name: Checkout test branch only
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Python for research audit
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Node for existing signal engine
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Install existing read-only dependencies
+        run: python -m pip install --disable-pip-version-check 'nhplug==0.4.1' 'exchange-calendars>=4.9,<5' pandas 'PyYAML>=6,<7'
+      - name: Run frozen V8.9 analysis instead of push self-test
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          import yaml
+
+          workflow=Path('.github/workflows/v890-nh-300-heikin-audit.yml')
+          if not workflow.is_file():
+              raise SystemExit('Original V8.9 audit workflow is missing')
+          doc=yaml.safe_load(workflow.read_text(encoding='utf-8'))
+          steps=doc['jobs']['heikin-audit']['steps']
+          matches=[step for step in steps if step.get('name')=='300-stock HA and prior risk gate (research only)']
+          if len(matches)!=1:
+              raise SystemExit('V8.9 research step changed; manual review required')
+          script=matches[0]['run']
+          # Build workflow expression tokens at runtime to avoid Actions YAML interpolation.
+          expression=chr(36)+chr(123)*2+' github.event_name '+chr(125)*2
+          if script.count(expression)!=1:
+              raise SystemExit('Cannot safely select the real-audit path')
+          script=script.replace(expression, 'workflow_dispatch')
+          if chr(36)+chr(123)*2 in script:
+              raise SystemExit('Unrecognized workflow expression; refusing to run')
+          output=Path('/tmp/jongbe_v890_auto_research.sh')
+          output.write_text(script,encoding='utf-8')
+          output.chmod(0o700)
+          PY
+          bash /tmp/jongbe_v890_auto_research.sh
+      - name: Upload aggregate-only summary
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: jongbe-v890-ha-auto-fixed-${{ github.run_id }}
+          path: nh-v890/summary.json
+          if-no-files-found: warn
+          retention-days: 7
