@@ -1,0 +1,175 @@
+name: Jongbe V8.9.1 market-breadth HA 300 automatic audit (test only)
+
+on:
+  push:
+    branches: [v8.8.4-test]
+    paths:
+      - '.github/workflows/v891-market-regime-auto.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: jongbe-v891-market-breadth-auto
+  cancel-in-progress: false
+
+jobs:
+  market-breadth-audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    env:
+      NHPLUG_APP_KEY: ${{ secrets.NAMUH_APP_KEY }}
+      NHPLUG_APP_SECRET: ${{ secrets.NAMUH_APP_SECRET_KEY }}
+      NHPLUG_BASE_URL: https://api.nhplug.com:8443
+      NHPLUG_AUTH_URL: https://api.nhplug.com:8443
+      NHPLUG_RATE_LIMIT: '2'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Install existing read-only dependencies
+        run: python -m pip install --disable-pip-version-check 'nhplug==0.4.1' 'exchange-calendars>=4.9,<5' pandas 'PyYAML>=6,<7'
+      - name: Calculate same-session market breadth and HA forward returns
+        shell: bash
+        run: |
+          cat > /tmp/jongbe_v891_addition.js <<'JAVASCRIPT'
+          (function marketBreadthAudit(){
+            // A same-session, sampled-stock breadth proxy, not official index prices or institutional flows.
+            const breadth=new Map();
+            const counted=new Set();
+            for(const stock of data){
+              const b=stock.bars;
+              const closes=b.map(x=>x[4]);
+              const ma=engine.rolling(closes,20);
+              for(let i=Math.max(19,b.length-41);i<b.length;i++){
+                const date=b[i][0],avg=ma[i];
+                if(!Number.isFinite(avg)||avg<=0)continue;
+                const key=stock.code+'|'+date;
+                if(counted.has(key))continue;
+                counted.add(key);
+                const x=breadth.get(date)||{total:0,above:0};
+                x.total++;if(closes[i]>avg)x.above++;
+                breadth.set(date,x);
+              }
+            }
+            const kind=(date)=>{
+              const a=breadth.get(date);
+              if(!a||a.total<200)return 'insufficient_breadth';
+              const ratio=a.above/a.total;
+              return ratio>=0.6?'broad_up':ratio<=0.4?'broad_down':'mixed';
+            };
+            const dates=[...breadth.keys()].sort();
+            const latestDate=report.target_date;
+            const now=breadth.get(latestDate);
+            const regimes={earlier:{},later:{}};
+            const fresh={ha_turn:{},ha_quality:{},ha_and_risk_pass:{}};
+            function insert(bucket,regime,key,val){
+              bucket[regime]??={ha_turn:[],ha_quality:[],ha_and_risk_pass:[]};
+              bucket[regime][key].push(val);
+            }
+            let skippedNoBreadth=0;
+            for(const stock of data){
+              const b=stock.bars,h=heikin(b);
+              const end=b.length-1,start=Math.max(199,b.length-41);
+              if(end<199)continue;
+              // Latest is a separate EOD observation, with no next-day return attached.
+              const today=haSignal(b,h,end),todayRegime=kind(b[end][0]);
+              if(today.turn){fresh.ha_turn[todayRegime]=(fresh.ha_turn[todayRegime]||0)+1;}
+              if(today.quality){fresh.ha_quality[todayRegime]=(fresh.ha_quality[todayRegime]||0)+1;}
+              if(today.quality){
+                const current=engine.analyze(b.slice(end-199,end+1));
+                if(current.ready&&riskFilter(b.slice(end-199,end+1),current))
+                  fresh.ha_and_risk_pass[todayRegime]=(fresh.ha_and_risk_pass[todayRegime]||0)+1;
+              }
+              for(let i=start;i<end;i++){
+                const sig=haSignal(b,h,i);
+                if(!sig.turn)continue;
+                const regime=kind(b[i][0]);
+                if(regime==='insufficient_breadth'){skippedNoBreadth++;continue;}
+                const cohort=(i-(b.length-41))<20?'earlier':'later';
+                const net=100*(b[i+1][4]/b[i][4]-1)-.5;
+                if(!Number.isFinite(net))continue;
+                insert(regimes[cohort],regime,'ha_turn',net);
+                if(!sig.quality)continue;
+                insert(regimes[cohort],regime,'ha_quality',net);
+                const r=engine.analyze(b.slice(i-199,i+1));
+                if(r.ready&&riskFilter(b.slice(i-199,i+1),r))
+                  insert(regimes[cohort],regime,'ha_and_risk_pass',net);
+              }
+            }
+            const summarize=(arr)=>({n:arr.length,
+              avg_net_pct:arr.length?+(arr.reduce((a,b)=>a+b,0)/arr.length).toFixed(4):null,
+              positive_pct:arr.length?+(100*arr.filter(x=>x>0).length/arr.length).toFixed(2):null});
+            const results={};
+            for(const [period,groups] of Object.entries(regimes)){
+              results[period]={};
+              for(const regime of ['broad_up','mixed','broad_down']){
+                const k=groups[regime]||{ha_turn:[],ha_quality:[],ha_and_risk_pass:[]};
+                results[period][regime]=Object.fromEntries(Object.entries(k).map(([signal,arr])=>[signal,summarize(arr)]));
+              }
+            }
+            const currentRegime=kind(latestDate);
+            report.market_regime={method:'same-day 20-day MA breadth on sampled 300 current-universe stocks',
+              target_date:latestDate,latest:{class:currentRegime,stocks_with_ma20:now?.total||0,
+                above_ma20:now?.above||0,pct_above_ma20:now?.total?+(100*now.above/now.total).toFixed(2):null},
+              thresholds:{up_min:0.6,down_max:0.4,min_stocks:200},
+              current_signals_by_regime:fresh,backtest_by_regime:results,
+              skipped_events_missing_breadth:skippedNoBreadth,
+              dates_with_breadth:dates.length,independent_holdout:false,
+              note:'Not KOSPI/KOSDAQ index levels, not foreign/institutional flow. Cross-sectional sampled breadth is observed at the close of the signal day; historical rules may be overfit.'};
+            const summary=['### V8.9.1 시장 환경별 하이킨 아시 연구 (운영 변경 없음)',
+              `- 기준일 ${latestDate} · 300종목 표본 20일선 위 비율 ${report.market_regime.latest.pct_above_ma20 ?? '미확인'}% (${now?.above||0}/${now?.total||0})`,
+              `- 현재 시장 환경(표본 기준): ${currentRegime}`,
+              `- 현재 신호 분류: ${JSON.stringify(fresh)}`,
+              `- 전반 20거래일 환경별 결과(0.5%p 비용 차감): ${JSON.stringify(results.earlier)}`,
+              `- 후반 20거래일 환경별 결과(0.5%p 비용 차감): ${JSON.stringify(results.later)}`,
+              '- 참고: 공식 시장지수·외국인/기관 수급 미포함. 표본 편향·중첩 이벤트·독립 검증 부족.',
+              '- 분석 성공은 수익성 입증이 아닙니다. 실매수 신호 없음.'];
+            if(process.env.GITHUB_STEP_SUMMARY)fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY,summary.join('\n')+'\n');
+            console.log('V891_AGGREGATE:',JSON.stringify({latest:report.market_regime.latest,by_regime:results}));
+          })();
+          JAVASCRIPT
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          import yaml
+
+          source=Path('.github/workflows/v890-nh-300-heikin-audit.yml')
+          if not source.is_file():raise SystemExit('V8.9 source workflow missing')
+          wf=yaml.safe_load(source.read_text(encoding='utf8'))
+          steps=wf['jobs']['heikin-audit']['steps']
+          match=[x for x in steps if x.get('name')=='300-stock HA and prior risk gate (research only)']
+          if len(match)!=1:raise SystemExit('V8.9 research step changed unexpectedly')
+          script=match[0]['run']
+          expr=chr(36)+chr(123)*2+' github.event_name '+chr(125)*2
+          if script.count(expr)!=1:raise SystemExit('Unexpected event-name expression')
+          script=script.replace(expr,'workflow_dispatch')
+          if chr(36)+chr(123)*2 in script:raise SystemExit('Unknown expression in base script')
+          marker="          report.analyzed=analyzed;report.eligible_40_day=eligible;"
+          # Search without relying on the indentation of yaml block scalar.
+          if script.count('report.analyzed=analyzed;report.eligible_40_day=eligible;')!=1:
+              raise SystemExit('V8.9 aggregation point changed')
+          script=script.replace('report.analyzed=analyzed;report.eligible_40_day=eligible;',
+              'report.analyzed=analyzed;report.eligible_40_day=eligible;' + chr(10) + "__INJECT__")
+          # Ensure insertion has been applied before the existing summary.json write.
+          injected=Path('/tmp/jongbe_v891_addition.js').read_text(encoding='utf8')
+          script=script.replace('__INJECT__',injected)
+          out=Path('/tmp/jongbe_v891_run.sh')
+          out.write_text(script,encoding='utf8')
+          out.chmod(0o700)
+          PY
+          bash /tmp/jongbe_v891_run.sh
+      - name: Upload aggregate-only research report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: jongbe-v891-market-regime-${{ github.run_id }}
+          path: nh-v890/summary.json
+          if-no-files-found: warn
+          retention-days: 7
