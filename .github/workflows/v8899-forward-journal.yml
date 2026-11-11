@@ -1,0 +1,301 @@
+name: Jongbe V8.8.9.9 forward signal journal (test-only)
+
+on:
+  push:
+    branches: [v8.8.4-test]
+    paths:
+      - '.github/workflows/v8899-forward-journal.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: jongbe-v8899-forward-journal
+  cancel-in-progress: false
+
+jobs:
+  forward-journal:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      NHPLUG_APP_KEY: ${{ secrets.NAMUH_APP_KEY }}
+      NHPLUG_APP_SECRET: ${{ secrets.NAMUH_APP_SECRET_KEY }}
+      NHPLUG_BASE_URL: https://api.nhplug.com:8443
+      NHPLUG_AUTH_URL: https://api.nhplug.com:8443
+      NHPLUG_RATE_LIMIT: '2'
+      GH_READ_TOKEN: ${{ github.token }}
+      REPOSITORY: ${{ github.repository }}
+      RUN_ID: ${{ github.run_id }}
+      EVENT_NAME: ${{ github.event_name }}
+      BRANCH: ${{ github.ref_name }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Install read-only NH client and KRX calendar
+        if: github.event_name == 'workflow_dispatch'
+        run: python -m pip install --disable-pip-version-check 'nhplug==0.4.1' 'exchange-calendars>=4.9,<5' pandas
+      - name: Forward journal snapshot and next-session verification
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p nh-v8899
+          trap 'rm -f /tmp/jongbe_v8899_private.ndjson' EXIT
+          cat >/tmp/jongbe_v8899_capture.js <<'JS'
+          const fs=require('node:fs');
+          const engine=require(process.cwd()+'/v88/v88-engine.js');
+          const raw=fs.readFileSync('/tmp/jongbe_v8899_private.ndjson','utf8').trim();
+          const stocks=raw?raw.split('\n').map(JSON.parse):[];
+          const report=JSON.parse(fs.readFileSync('nh-v8899/summary.json','utf8'));
+          const counts={};const blocked={};const candidates=[];let analyzed=0;
+          const bump=(o,k)=>o[k]=(o[k]||0)+1;
+          function filter(b,r){
+            const cls=b.map(x=>x[4]),close=cls.at(-1);
+            const ma5=engine.rolling(cls,5).at(-1),ma20=engine.rolling(cls,20).at(-1);
+            const avg=b.slice(-21,-1).reduce((s,x)=>s+x[5],0)/20;
+            const vr=avg>0?b.at(-1)[5]/avg:null;
+            const dist=ma20>0?close/ma20-1:null;
+            if(r.risk!=='signal')return {pass:false,reason:'not_positive_signal'};
+            if(![ma5,ma20,vr,dist].every(Number.isFinite))return {pass:false,reason:'insufficient_indicator'};
+            if(vr>3.0||dist>0.08||dist < -0.08)return {pass:false,reason:'overheated_or_far_from_ma20'};
+            if(r.signals.includes('bb_reentry')){
+              return vr>=0.8&&vr<=2.0&&close>=ma20*.94&&close<=ma20*1.04
+                ?{pass:true,reason:'bb_reentry'}:{pass:false,reason:'bb_reentry_quality_filter'};
+            }
+            if(r.signals.some(s=>['bb_breakout_volume','bb_squeeze_breakout','cloud_breakout'].includes(s))){
+              return close>=ma5&&ma5>=ma20&&dist<=.05&&vr>=1.1&&vr<=2.3
+                ?{pass:true,reason:'trend_breakout'}:{pass:false,reason:'trend_quality_filter'};
+            }
+            return {pass:false,reason:'other_signal_not_validated'};
+          }
+          for(const row of stocks){
+            try{
+              const b=row.bars;
+              if(b.length<200 || b.at(-1)[0]!==report.session)throw Error('invalid_history');
+              const r=engine.analyze(b.slice(-200));
+              if(!r.ready)throw Error('engine_unready');
+              analyzed++;
+              if(r.risk!=='signal')continue;
+              const f=filter(b.slice(-200),r);
+              bump(counts,'baseline');
+              if(f.pass)bump(counts,'passed');else bump(blocked,f.reason);
+              // Store only ticker + categorical flags; no licensed OHLC, keys, or trading accounts.
+              candidates.push({code:row.code,market:row.market,signal_types:r.signals,
+                filter_passed:f.pass,filter_category:f.reason});
+            }catch(e){bump(counts,'engine_error');}
+          }
+          if(analyzed<270)throw Error('Insufficient engine coverage; refusing to record a snapshot');
+          const journal={schema:'jongbe-v8899-forward-snapshot-v1',session:report.session,
+            recorded_at_kst:report.recorded_at_kst,run_id:report.run_id,
+            sample_size:300,analyzed,baseline:counts.baseline||0,passed:counts.passed||0,
+            filter_rules:'v8898_frozen',candidates,read_only:true};
+          fs.writeFileSync('nh-v8899/snapshot.json',JSON.stringify(journal,null,2)+'\n');
+          Object.assign(report,{analyzed,baseline:journal.baseline,passed:journal.passed,
+            blocked,decision:'RESEARCH_ONLY_NO_TRADE_UNTIL_INDEPENDENT_EDGE',
+            note:'This journal never authorizes an order. Signal-day snapshot is frozen before next-session verification.'});
+          fs.writeFileSync('nh-v8899/summary.json',JSON.stringify(report,null,2)+'\n');
+          if(process.env.GITHUB_STEP_SUMMARY)fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY,
+            `### V8.8.9.9 당일 신호 확정 기록 (연구 전용)\n- 확정 거래일: ${report.session}\n- 분석: ${analyzed}/300\n- 원래 신호: ${journal.baseline} / 필터 통과: ${journal.passed}\n- 다음 거래일 가격 검증 대기\n- 실전 매매 신호 아님; 계좌·주문·운영 페이지 변경 없음\n`);
+          JS
+          python - <<'PY'
+          import io, json, os, re, subprocess, time, urllib.request, zipfile
+          from collections import Counter
+          from datetime import date, datetime, timedelta, time as daytime
+          from pathlib import Path
+          from zoneinfo import ZoneInfo
+          
+          out=Path('nh-v8899/summary.json')
+          event=os.getenv('EVENT_NAME','')
+          if event=='push':
+              # A push must never create a stale, backdated forward-test signal.
+              out.write_text(json.dumps({'schema':'jongbe-v8899-selftest','status':'READY_FOR_MANUAL_AFTER_CLOSE',
+                'note':'Push checks installation only; after 16:30 KST on a KRX trading day select Run workflow on v8.8.4-test. Schedules on nondefault branches do not execute.'},indent=2)+'\n')
+              if os.getenv('GITHUB_STEP_SUMMARY'):
+                with open(os.environ['GITHUB_STEP_SUMMARY'],'a') as f:
+                  f.write('### V8.8.9.9 설치 자체 점검 완료\n- 자동 시세 수집 **미실행** (오전/장중 과거 날짜에 신호 소급 기록 방지)\n- 장 마감 후 Actions → Run workflow → v8.8.4-test 선택\n- 예약 실행은 기본 브랜치에서만 동작하므로 현재 테스트 브랜치는 수동 실행\n')
+              raise SystemExit(0)
+          if event!='workflow_dispatch':raise SystemExit('Unsupported event')
+          
+          import exchange_calendars as ec
+          import pandas as pd
+          from nhplug import call
+          
+          now=datetime.now(ZoneInfo('Asia/Seoul'))
+          # Accept only current, completed trading day. No retroactively invented forward signals.
+          if now.time()<daytime(16,30):raise SystemExit('Manual signal recording is allowed only after 16:30 KST')
+          closed={'2026-06-03','2026-07-17'}
+          sessions=ec.get_calendar('XKRX').sessions_in_range(pd.Timestamp(now.date()-timedelta(days=45)),pd.Timestamp(now.date()+timedelta(days=3)))
+          days=[x.date().isoformat() for x in sessions if x.date().isoformat() not in closed]
+          today=now.date().isoformat()
+          if today not in days:raise SystemExit('Today is not a KRX session; no snapshot recorded')
+          previous=days[days.index(today)-1]
+          if not os.getenv('NHPLUG_APP_KEY') or not os.getenv('NHPLUG_APP_SECRET'):
+              raise SystemExit('NH API credentials missing')
+          
+          # Download a previously frozen snapshot from another workflow run if available.
+          # Prefer oldest snapshot from the previous session; never search future dated records.
+          def api(url,raw=False):
+              req=urllib.request.Request(url,headers={'Authorization':'Bearer '+os.environ['GH_READ_TOKEN'],
+                'Accept':'application/vnd.github+json','X-GitHub-Api-Version':'2022-11-28',
+                'User-Agent':'jongbe-v8899-test'})
+              with urllib.request.urlopen(req,timeout=30) as rsp:
+                return rsp.read() if raw else json.load(rsp)
+          
+          def previous_snapshot():
+              choices=[]
+              repo=os.environ['REPOSITORY']
+              for page in range(1,5):
+                data=api(f'https://api.github.com/repos/{repo}/actions/artifacts?per_page=100&page={page}')
+                arts=data.get('artifacts',[])
+                if not arts:break
+                for a in arts:
+                  if not a['name'].startswith('jongbe-v8899-journal-') or a.get('expired') or str((a.get('workflow_run') or {}).get('id'))==os.environ['RUN_ID']:
+                    continue
+                  if (a.get('workflow_run') or {}).get('head_branch')!='v8.8.4-test':continue
+                  choices.append(a)
+              # Earliest successfully frozen snapshot for prior day is used, never cherry-picked based on outcome.
+              for a in sorted(choices,key=lambda x:x['created_at']):
+                try:
+                  blob=api(a['archive_download_url'],raw=True)
+                  with zipfile.ZipFile(io.BytesIO(blob)) as z:
+                    filenames=[n for n in z.namelist() if n.endswith('snapshot.json')]
+                    if not filenames:continue
+                    s=json.loads(z.read(filenames[0]))
+                    if (s.get('schema')=='jongbe-v8899-forward-snapshot-v1' and s.get('session')==previous
+                       and s.get('filter_rules')=='v8898_frozen' and s.get('recorded_at_kst','')[:10]==previous):
+                        return s
+                except Exception:
+                  # Do not select an alternative on transient download error: fail closed.
+                  raise RuntimeError('Unable to inspect prior artifact; next-day validation blocked')
+              return None
+          
+          prior=previous_snapshot()
+          status=Counter()
+          def parse_date(v):
+              for fmt in ('%y/%m/%d','%Y-%m-%d','%Y%m%d','%Y/%m/%d','%y%m%d'):
+                  try:
+                      d=datetime.strptime(str(v or '').strip(),fmt).date()
+                      return d.isoformat() if date(2020,1,1)<=d<=date(2032,12,31) else None
+                  except ValueError:pass
+              return None
+          
+          def numeric(v,positive=False):
+              if v is None or isinstance(v,bool):return None
+              s=str(v).strip().replace(',','')
+              if not re.fullmatch(r'\d{1,15}(?:\.\d{1,4})?',s):return None
+              n=float(s)
+              return n if (n>0 if positive else n>=0) else None
+          
+          def bars_for(code):
+              res=call('/krstock/quote/v1/currentDaily',{'market_cd':'KRX','iem_cd':code,'array_cnt':'452','view_main_yn':'Y'})
+              raw=res.get('Output_0') if isinstance(res,dict) else None
+              if isinstance(raw,dict):raw=[raw]
+              if not isinstance(raw,list):return []
+              valid={}; conflict=False
+              for r in raw:
+                  if not isinstance(r,dict):continue
+                  d=parse_date(r.get('bsop_date'))
+                  if not d or d>today:continue
+                  o=numeric(r.get('stck_oprc'),True);h=numeric(r.get('stck_hgpr'),True)
+                  l=numeric(r.get('stck_lwpr'),True);c=numeric(r.get('stck_clpr'),True)
+                  v=numeric(r.get('acml_vol'))
+                  if None in (o,h,l,c,v) or not l<=min(o,c)<=max(o,c)<=h:continue
+                  b=[d,o,h,l,c,v]
+                  if d in valid and valid[d]!=b:conflict=True
+                  valid[d]=b
+              return [] if conflict else [valid[d] for d in sorted(valid)]
+          
+          # Evaluate the ACTUAL frozen T-day signal using retrieved T and T+1 bars.
+          verification={'previous_session':previous,'snapshot_found':prior is not None,'tested':0,
+                        'signal_count':0,'passed_count':0,'skipped':{},'gross_next_open_pct':None,
+                        'gross_next_close_pct':None,'net_next_close_pct_cost_0_5':None}
+          if prior:
+              returns_all=[]; returns_pass=[]; skipped=Counter()
+              verification['signal_count']=len(prior['candidates']);verification['passed_count']=prior['passed']
+              for c in prior['candidates']:
+                  code=c.get('code')
+                  if not isinstance(code,str) or not re.fullmatch(r'\d{6}',code):
+                      skipped['invalid_symbol']+=1;continue
+                  try:
+                      bars=bars_for(code);m={b[0]:b for b in bars}
+                      before=m.get(previous);after=m.get(today)
+                      if before is None or after is None:
+                          skipped['missing_adjacent_sessions']+=1;continue
+                      ret_open=(after[1]/before[4]-1)*100
+                      ret_close=(after[4]/before[4]-1)*100
+                      returns_all.append((ret_open,ret_close))
+                      if c.get('filter_passed') is True:returns_pass.append((ret_open,ret_close))
+                  except Exception:skipped['request_or_parse_failed']+=1
+                  time.sleep(.7)
+              def metrics(vals):
+                  if not vals:return {'n':0,'average_pct':None,'positive_pct':None}
+                  x=[y[1] for y in vals]
+                  return {'n':len(vals),'average_pct':round(sum(x)/len(x),4),
+                          'positive_pct':round(100*sum(v>0 for v in x)/len(x),2)}
+              verification.update({'tested':len(returns_all),'baseline_next_close':metrics(returns_all),
+               'filtered_next_close':metrics(returns_pass),
+               'filtered_next_close_net_0_5':metrics([(x,y-.5) for x,y in returns_pass]),
+               'skipped':dict(skipped)})
+              Path('nh-v8899/verified.json').write_text(json.dumps(verification,ensure_ascii=False,indent=2)+'\n')
+              if os.getenv('GITHUB_STEP_SUMMARY'):
+                with open(os.environ['GITHUB_STEP_SUMMARY'],'a') as f:
+                  f.write('### 전 거래일 확정 신호의 익일 성과 (독립 기록)\n'
+                    f'- 전 거래일: {previous} / 기록된 신호: {verification["signal_count"]}\n'
+                    f'- 실제 검증: {verification["tested"]} / 필터 통과 신호: {verification["passed_count"]}\n'
+                    f'- 필터 통과 익일 종가 순수익 가정(0.5%p 비용): {json.dumps(verification["filtered_next_close_net_0_5"],ensure_ascii=False)}\n'
+                    '- 계좌/주문 미사용; 전일 확정 기록과 오늘 OHLC를 별도 비교\n')
+          
+          universe=json.loads(Path('results.json').read_text(encoding='utf8'))
+          pools={'KOSPI':set(),'KOSDAQ':set()}
+          for r in universe.get('rows',[]):
+              m,c=r.get('market'),str(r.get('code',''))
+              if m in pools and re.fullmatch(r'\d{6}',c):pools[m].add(c)
+          if sum(map(len,pools.values()))<2000:raise SystemExit('Incomplete stock universe')
+          anchors=[('KOSPI','005930'),('KOSPI','000660'),('KOSDAQ','328130')]
+          if any(c not in pools[m] for m,c in anchors):raise SystemExit('Anchor missing')
+          excluded={c for _,c in anchors}
+          def pick(m,n):
+              xs=sorted(pools[m]-excluded)
+              return [(m,xs[i*(len(xs)-1)//(n-1)]) for i in range(n)]
+          selected=anchors+pick('KOSPI',148)+pick('KOSDAQ',149)
+          assert len(selected)==300 and len({c for _,c in selected})==300
+          private=Path('/tmp/jongbe_v8899_private.ndjson')
+          with private.open('w',encoding='utf8') as f:
+              os.chmod(private,0o600)
+              for i,(market,code) in enumerate(selected,1):
+                  reason='request_failed'
+                  try:
+                      b=bars_for(code)
+                      if not b:reason='missing_or_invalid_rows'
+                      elif b[-1][0]!=today:reason='stale_session'
+                      elif len(b)<200:reason='under_200'
+                      else:
+                          f.write(json.dumps({'market':market,'code':code,'bars':b[-200:]})+'\n')
+                          reason='ready'
+                  except Exception:reason='request_failed'
+                  status[reason]+=1
+                  if i%25==0:print(f'History {i}/300, ready={status["ready"]}',flush=True)
+                  time.sleep(.7)
+          report={'schema':'jongbe-v8899-forward-journal-summary-v1',
+            'session':today,'previous_session':previous,'recorded_at_kst':now.isoformat(timespec='seconds'),
+            'run_id':os.environ['RUN_ID'],'history_ready':status['ready'],
+            'history_status':dict(status),'previous_verification':verification,
+            'read_only':True,'operating_site_changed':False,'quotes_exported':False,
+            'warning':'Research-only; no independent profitability established; cost 0.5 percentage points assumed.'}
+          out.write_text(json.dumps(report,ensure_ascii=False,indent=2)+'\n')
+          subprocess.run(['node','/tmp/jongbe_v8899_capture.js'],check=True)
+          PY
+      - name: Upload journal and aggregate verification only
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: jongbe-v8899-journal-${{ github.run_id }}
+          path: nh-v8899/
+          if-no-files-found: warn
+          retention-days: 30
