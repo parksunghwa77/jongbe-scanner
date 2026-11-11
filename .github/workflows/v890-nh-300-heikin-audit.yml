@@ -1,0 +1,256 @@
+name: Jongbe V8.9 NH 300 Heikin Ashi research (read-only)
+
+on:
+  push:
+    branches: [v8.8.4-test]
+    paths:
+      - '.github/workflows/v890-nh-300-heikin-audit.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: jongbe-v890-ha-research
+  cancel-in-progress: false
+
+jobs:
+  heikin-audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    env:
+      NHPLUG_APP_KEY: ${{ secrets.NAMUH_APP_KEY }}
+      NHPLUG_APP_SECRET: ${{ secrets.NAMUH_APP_SECRET_KEY }}
+      NHPLUG_BASE_URL: https://api.nhplug.com:8443
+      NHPLUG_AUTH_URL: https://api.nhplug.com:8443
+      NHPLUG_RATE_LIMIT: '2'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Install read-only client and trading calendar
+        if: github.event_name == 'workflow_dispatch'
+        run: python -m pip install --disable-pip-version-check 'nhplug==0.4.1' 'exchange-calendars>=4.9,<5' pandas
+      - name: 300-stock HA and prior risk gate (research only)
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p nh-v890
+          trap 'rm -f /tmp/jongbe_v890_private.ndjson' EXIT
+          if [ "${{ github.event_name }}" = "push" ]; then
+            node <<'JS'
+          const fs=require('node:fs');
+          const e=require('./v88/v88-engine.js');
+          // Standard HA recursion: HA close=(O+H+L+C)/4;
+          // HA open=(previous HA open + previous HA close)/2.
+          function ha(b){let out=[];for(const x of b){const c=(x[1]+x[2]+x[3]+x[4])/4;const o=out.length?(out.at(-1).o+out.at(-1).c)/2:(x[1]+x[4])/2;out.push({o,c});}return out;}
+          const b=[[1,10,12,9,11,100],[2,11,13,10,12,100],[3,12,14,11,13,120]];
+          const h=ha(b);if(h.length!==3||Math.abs(h[0].o-10.5)>1e-9||Math.abs(h[0].c-10.5)>1e-9||Math.abs(h[1].o-10.5)>1e-9||e.rolling([1,2,3,4,5],5).at(-1)!==3)throw Error('self-test failed');
+          const v={schema:'jongbe-v890-ha-selftest',status:'READY_FOR_MANUAL_RUN',research_only:true};
+          fs.writeFileSync('nh-v890/summary.json',JSON.stringify(v,null,2));
+          if(process.env.GITHUB_STEP_SUMMARY)fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY,'### V8.9 설치 점검 통과\n- 아직 NH 데이터 수집 및 백테스트 미실행\n- Actions에서 v8.8.4-test 브랜치의 Run workflow 실행\n- 계좌·주문·운영 사이트 변경 없음\n');
+          JS
+            exit 0
+          fi
+          python - <<'PY'
+          from collections import Counter
+          from datetime import datetime, date, timedelta, time as daytime
+          from pathlib import Path
+          from zoneinfo import ZoneInfo
+          import json, os, re, time
+          import exchange_calendars as ec
+          import pandas as pd
+          from nhplug import call
+
+          now=datetime.now(ZoneInfo('Asia/Seoul'))
+          cutoff=now.date() if now.time()>=daytime(16,30) else now.date()-timedelta(days=1)
+          sessions=ec.get_calendar('XKRX').sessions_in_range(pd.Timestamp(cutoff-timedelta(days=55)),pd.Timestamp(cutoff))
+          known_closed={'2026-06-03','2026-07-17'}
+          dates=[x.date().isoformat() for x in sessions if x.date().isoformat() not in known_closed]
+          if not dates:raise RuntimeError('No valid completed session')
+          target=dates[-1]
+          if not os.getenv('NHPLUG_APP_KEY') or not os.getenv('NHPLUG_APP_SECRET'):
+              raise RuntimeError('Missing NH credentials; no values printed')
+          universe=json.loads(Path('results.json').read_text(encoding='utf8'))
+          pools={'KOSPI':set(),'KOSDAQ':set()}
+          for r in universe.get('rows',[]):
+              market,code=r.get('market'),str(r.get('code',''))
+              if market in pools and re.fullmatch(r'\d{6}',code):pools[market].add(code)
+          if sum(map(len,pools.values()))<2000:raise RuntimeError('Incomplete source universe')
+          anchors=[('KOSPI','005930'),('KOSPI','000660'),('KOSDAQ','328130')]
+          if any(code not in pools[market] for market,code in anchors):raise RuntimeError('Anchor missing')
+          excluded={code for _,code in anchors}
+          def sample(m,n):
+              arr=sorted(pools[m]-excluded)
+              if len(arr)<n:raise RuntimeError('Insufficient universe')
+              return [(m,arr[i*(len(arr)-1)//(n-1)]) for i in range(n)]
+          selected=anchors+sample('KOSPI',148)+sample('KOSDAQ',149)
+          if len({c for _,c in selected})!=300:raise RuntimeError('Nonunique sample')
+          def parsedate(v):
+              for fmt in ('%y/%m/%d','%Y-%m-%d','%Y%m%d','%Y/%m/%d','%y%m%d'):
+                  try:
+                      d=datetime.strptime(str(v or '').strip(),fmt).date()
+                      return d.isoformat() if date(2020,1,1)<=d<=date(2032,12,31) else None
+                  except ValueError:pass
+              return None
+          def n(v,positive=False):
+              if v is None or isinstance(v,bool):return None
+              t=str(v).strip().replace(',','')
+              if not re.fullmatch(r'\d{1,15}(?:\.\d{1,4})?',t):return None
+              x=float(t)
+              return x if (x>0 if positive else x>=0) else None
+          stats=Counter()
+          with open('/tmp/jongbe_v890_private.ndjson','w',encoding='utf8') as f:
+              os.chmod('/tmp/jongbe_v890_private.ndjson',0o600)
+              for i,(market,code) in enumerate(selected,1):
+                  reason='request_failed'
+                  try:
+                      r=call('/krstock/quote/v1/currentDaily',{'market_cd':'KRX','iem_cd':code,'array_cnt':'452','view_main_yn':'Y'})
+                      src=r.get('Output_0') if isinstance(r,dict) else None
+                      if isinstance(src,dict):src=[src]
+                      if not isinstance(src,list) or not src:reason='no_rows'
+                      else:
+                          values={};conflict=False
+                          for x in src:
+                              if not isinstance(x,dict):continue
+                              d=parsedate(x.get('bsop_date'))
+                              if not d or d>target:continue
+                              o=n(x.get('stck_oprc'),True);h=n(x.get('stck_hgpr'),True)
+                              l=n(x.get('stck_lwpr'),True);c=n(x.get('stck_clpr'),True);v=n(x.get('acml_vol'))
+                              if None in (o,h,l,c,v) or not l<=min(o,c)<=max(o,c)<=h:continue
+                              bar=[d,o,h,l,c,v]
+                              if d in values and values[d]!=bar:conflict=True
+                              values[d]=bar
+                          days=sorted(values)
+                          if conflict:reason='conflicting_duplicate'
+                          elif not days:reason='invalid_rows'
+                          elif days[-1]!=target:reason='stale_session'
+                          elif len(days)<241:reason='under_241'
+                          else:
+                              f.write(json.dumps({'code':code,'market':market,'bars':[values[d] for d in days]})+'\n')
+                              reason='ready'
+                  except Exception:reason='request_failed'
+                  stats[reason]+=1
+                  if i%25==0:print(f'History {i}/300; ready={stats["ready"]}',flush=True)
+                  time.sleep(.7)
+          report={'schema':'jongbe-v890-ha-audit-v1','target_date':target,'sample_size':300,
+              'history_ready':stats['ready'],'data_status':dict(stats),
+              'market_data_exported':False,'orders_used':False,'operating_site_changed':False,
+              'net_cost_assumption_pct_points':0.5,'independent_validation':False,
+              'caveat':'Selected current-universe sample, correlated/overlapping events, hypothetical close entry and assumed cost.'}
+          Path('nh-v890/summary.json').write_text(json.dumps(report,ensure_ascii=False,indent=2)+'\n')
+          PY
+          node <<'JS'
+          'use strict';
+          const fs=require('node:fs');
+          const engine=require('./v88/v88-engine.js');
+          const summaryPath='nh-v890/summary.json';
+          const report=JSON.parse(fs.readFileSync(summaryPath,'utf8'));
+          const raw=fs.readFileSync('/tmp/jongbe_v890_private.ndjson','utf8').trim();
+          const data=raw?raw.split('\n').map(JSON.parse):[];
+          const count=(obj,key)=>obj[key]=(obj[key]||0)+1;
+          // All HA candles recursively begin with the first available historical bar.
+          // No truncated-lookback reseeding at each historical event date.
+          function heikin(bars){const h=[];for(const r of bars){
+            const close=(r[1]+r[2]+r[3]+r[4])/4;
+            const open=h.length?(h.at(-1).open+h.at(-1).close)/2:(r[1]+r[4])/2;
+            h.push({open,close,high:Math.max(r[2],open,close),low:Math.min(r[3],open,close)});
+          }return h;}
+          function haSignal(b,h,i){
+            if(i<199)return {turn:false,quality:false};
+            const prev=h[i-1],now=h[i];
+            const turn=prev.close<prev.open&&now.close>now.open;
+            const closes=b.slice(0,i+1).map(r=>r[4]);
+            const ma5=engine.rolling(closes,5).at(-1),ma20=engine.rolling(closes,20).at(-1);
+            const volumeAvg=b.slice(i-20,i).reduce((s,r)=>s+r[5],0)/20;
+            const volumeRatio=volumeAvg>0?b[i][5]/volumeAvg:null;
+            // Conservative conjunctive experiment; HA candles NEVER treated as executable prices.
+            const quality=turn&&Number.isFinite(ma5)&&Number.isFinite(ma20)&&
+              Number.isFinite(volumeRatio)&&b[i][4]>=ma5&&b[i][4]>=ma20&&volumeRatio>=1.1;
+            return {turn,quality};
+          }
+          // Same frozen version of the V8.8.9.8 risk filter, on real candles.
+          function riskFilter(b,r){
+            const closes=b.map(x=>x[4]),c=closes.at(-1);
+            const ma5=engine.rolling(closes,5).at(-1),ma20=engine.rolling(closes,20).at(-1);
+            const avg=b.slice(-21,-1).reduce((s,x)=>s+x[5],0)/20;
+            const vr=avg>0?b.at(-1)[5]/avg:null;
+            const dist=ma20>0?c/ma20-1:null;
+            if(r.risk!=='signal')return false;
+            if(![ma5,ma20,vr,dist].every(Number.isFinite))return false;
+            if(vr>3||dist>.08||dist<-.08)return false;
+            if(r.signals.includes('bb_reentry'))return vr>=.8&&vr<=2&&c>=ma20*.94&&c<=ma20*1.04;
+            if(r.signals.some(x=>['bb_breakout_volume','bb_squeeze_breakout','cloud_breakout'].includes(x)))
+              return c>=ma5&&ma5>=ma20&&dist<=.05&&vr>=1.1&&vr<=2.3;
+            return false;
+          }
+          const latest={ha_turn:0,ha_quality:0,legacy_signal:0,legacy_risk_pass:0,ha_and_risk_pass:0};
+          const errors={};const cohorts={earlier:{ha:[],quality:[],confluence:[]},later:{ha:[],quality:[],confluence:[]}};
+          let analyzed=0,eligible=0;
+          for(const s of data){try{
+            const b=s.bars;const h=heikin(b);
+            const today=b.length-1;
+            const r=engine.analyze(b.slice(-200));
+            if(!r.ready)throw Error('engine_not_ready');
+            analyzed++;
+            const sig=haSignal(b,h,today);
+            if(sig.turn)latest.ha_turn++;
+            if(sig.quality)latest.ha_quality++;
+            if(r.risk==='signal')latest.legacy_signal++;
+            const filterPass=riskFilter(b.slice(-200),r);
+            if(filterPass)latest.legacy_risk_pass++;
+            if(sig.quality&&filterPass)latest.ha_and_risk_pass++;
+            if(b.length<242)continue;
+            eligible++;
+            const start=b.length-41;
+            for(let i=start;i<b.length-1;i++){
+              const z=haSignal(b,h,i);if(!z.turn)continue;
+              const prefix=b.slice(i-199,i+1),hist=engine.analyze(prefix);
+              if(!hist.ready)continue;
+              const f=riskFilter(prefix,hist);
+              const net=100*(b[i+1][4]/b[i][4]-1)-.5;
+              const cohort=i-start<20?'earlier':'later';
+              cohorts[cohort].ha.push(net);
+              if(z.quality)cohorts[cohort].quality.push(net);
+              if(z.quality&&f)cohorts[cohort].confluence.push(net);
+            }
+          }catch(e){count(errors,e.message==='engine_not_ready'?e.message:'analysis_error');}}
+          function stats(v){return {n:v.length,avg_net_pct:v.length?+(v.reduce((a,x)=>a+x,0)/v.length).toFixed(4):null,
+            positive_pct:v.length?+(100*v.filter(x=>x>0).length/v.length).toFixed(2):null};}
+          const backtest=Object.fromEntries(Object.entries(cohorts).map(([period,g])=>
+            [period,Object.fromEntries(Object.entries(g).map(([k,v])=>[k,stats(v)]))]));
+          report.analyzed=analyzed;report.eligible_40_day=eligible;
+          report.latest=latest;report.backtest=backtest;report.errors=errors;
+          report.decision='RESEARCH_ONLY_NO_TRADE_UNTIL_FORWARD_VALIDATION';
+          report.diagnostic_passed=analyzed>=270&&eligible>=250;
+          report.notes=['HA conditions are exploratory, not a validated buy signal.',
+            'All moving averages, volume and hypothetical close fills use real OHLCV, never synthetic HA OHLC.',
+            'This reuses historical windows after prior research; selection and multiple-testing biases remain.',
+            'A signal that appears in retrospective history is not a forward-recorded trade.'];
+          fs.writeFileSync(summaryPath,JSON.stringify(report,null,2)+'\n');
+          const lines=['### 종배 V8.9 하이킨 아시 300종목 연구 (읽기 전용)',
+            `- 기준일: ${report.target_date} / 기록 확보 ${report.history_ready}/300 / 엔진 ${analyzed}/300`,
+            `- HA 음봉→양봉: ${latest.ha_turn} · HA+실제종가 이평선+거래량: ${latest.ha_quality}`,
+            `- 기존 원래 신호: ${latest.legacy_signal} · 기존 위험 필터 통과: ${latest.legacy_risk_pass}`,
+            `- **HA 품질 + 기존 위험 필터 동시 통과: ${latest.ha_and_risk_pass}종목**`,
+            `- 과거 전반 20일(비용 0.5%p 차감): ${JSON.stringify(backtest.earlier)}`,
+            `- 과거 후반 20일(비용 0.5%p 차감): ${JSON.stringify(backtest.later)}`,
+            '- **판정: 연구용 관찰만 / 실매수 신호 아님**',
+            '- 주의: 현 구성 종목을 과거에 소급 적용, 겹치는 신호, 종가 체결 가정, 독립 검증 아님.',
+            '- 계좌·주문·운영 웹사이트 변경 없음. 민감 시세 원본 외부 업로드 없음.'];
+          if(process.env.GITHUB_STEP_SUMMARY)fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY,lines.join('\n')+'\n');
+          console.log('AGGREGATE ONLY:',JSON.stringify({target:report.target_date,latest,diagnostic_passed:report.diagnostic_passed}));
+          if(!report.diagnostic_passed)process.exitCode=1;
+          JS
+      - name: Upload aggregate-only report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: jongbe-v890-ha-summary-${{ github.run_id }}
+          path: nh-v890/summary.json
+          if-no-files-found: warn
+          retention-days: 7
