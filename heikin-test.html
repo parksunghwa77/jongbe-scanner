@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>종배 스캐너 · 하이킨 아시 테스트</title>
+<style>body{font-family:system-ui,sans-serif;margin:20px;color:#20334e}#status{padding:15px;border:1px solid #bbccdd;border-radius:10px;background:#f4f8fd}</style>
+</head>
+<body>
+<div id="status" role="status">종배 스캐너 원본을 불러오는 중입니다…</div>
+<script>
+/* Experiment-only launcher. Leaves index.html intact; loads a same-origin copy and
+   inserts the Heikin-Ashi add-on AFTER the inline original chart script. */
+(async()=>{
+  const status=document.getElementById('status');
+  try{
+    const response=await fetch('./index.html',{cache:'no-store'});
+    if(!response.ok)throw Error('원본 index.html을 불러오지 못했습니다 (HTTP '+response.status+')');
+    const html=await response.text();
+    const marker='</body></html>';
+    if(!html.includes(marker))throw Error('원본 페이지 형식이 달라 안전하게 연결할 수 없습니다.');
+    if(html.includes('src="./jongbe-heikin-ashi-test.js"'))throw Error('원본 페이지에 하이킨 아시가 이미 연결돼 있습니다.');
+    const upgraded=html.replace(marker,'<script defer src="./jongbe-heikin-ashi-test.js"><\/script>\n'+marker);
+    if(upgraded===html)throw Error('하이킨 아시 연결에 실패했습니다.');
+    document.open();document.write(upgraded);document.close();
+  }catch(e){status.textContent='⚠️ 테스트 페이지를 불러오지 못했습니다: '+e.message;}
+})();
+</script>
+</body>
+</html>
