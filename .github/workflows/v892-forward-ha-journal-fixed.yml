@@ -1,0 +1,105 @@
+name: Jongbe V8.9.2 Forward HA Journal - first capture fix (test only)
+
+on:
+  push:
+    branches: [v8.8.4-test]
+    paths:
+      - '.github/workflows/v892-forward-ha-journal-fixed.yml'
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: jongbe-v892-forward-fix
+  cancel-in-progress: false
+
+jobs:
+  journal-fixed:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    env:
+      NHPLUG_APP_KEY: ${{ secrets.NAMUH_APP_KEY }}
+      NHPLUG_APP_SECRET: ${{ secrets.NAMUH_APP_SECRET_KEY }}
+      NHPLUG_BASE_URL: https://api.nhplug.com:8443
+      NHPLUG_AUTH_URL: https://api.nhplug.com:8443
+      NHPLUG_RATE_LIMIT: '2'
+      GH_READ_TOKEN: ${{ github.token }}
+      REPOSITORY: ${{ github.repository }}
+      RUN_ID: ${{ github.run_id }}
+    steps:
+      - name: Checkout test branch only
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Install research dependencies
+        run: python -m pip install --disable-pip-version-check 'nhplug==0.4.1' 'exchange-calendars>=4.9,<5' pandas 'PyYAML>=6,<7'
+      - name: Capture today's signal with safe previous-session lookup
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          import yaml
+
+          source=Path('.github/workflows/v892-forward-ha-journal.yml')
+          if not source.exists(): raise SystemExit('Base V8.9.2 workflow not found')
+          doc=yaml.safe_load(source.read_text(encoding='utf-8'))
+          steps=doc['jobs']['journal']['steps']
+          found=[s for s in steps if s.get('name')=='Freeze same-day HA signals and verify the previous frozen session']
+          if len(found)!=1: raise SystemExit('Base workflow changed; review required')
+          script=found[0]['run']
+          # Do not silently overwrite future research rule changes.
+          old_loop="    for a in sorted(candidates,key=lambda x:x['created_at']):"
+          new_loop="""    for a in sorted(candidates,key=lambda x:x['created_at']):
+                  # Only inspect artifacts CREATED on the preceding Korean market day.
+                  created=datetime.fromisoformat(a['created_at'].replace('Z','+00:00'))
+                  if created.astimezone(ZoneInfo('Asia/Seoul')).date().isoformat()!=prev:
+                      continue"""
+          if script.count(old_loop)!=1: raise SystemExit('Previous-session selection changed')
+          script=script.replace(old_loop,new_loop)
+          # urllib redirects the GitHub API artifact download to blob storage.
+          # Never forward a GitHub bearer token to a different host.
+          old_function='def github(url):'
+          new_function="""class StripCrossHostAuthorization(urllib.request.HTTPRedirectHandler):
+              def redirect_request(self,req,fp,code,msg,headers,newurl):
+                  newreq=super().redirect_request(req,fp,code,msg,headers,newurl)
+                  if newreq is not None:
+                      from urllib.parse import urlsplit
+                      if urlsplit(req.full_url).netloc!=urlsplit(newurl).netloc:
+                          newreq.remove_header('Authorization')
+                  return newreq
+          def github(url):"""
+          if script.count(old_function)!=1: raise SystemExit('GitHub API helper changed')
+          script=script.replace(old_function,new_function)
+          old_open='with urllib.request.urlopen(req,timeout=35) as rsp:return rsp.read()'
+          new_open='with urllib.request.build_opener(StripCrossHostAuthorization()).open(req,timeout=35) as rsp:return rsp.read()'
+          if script.count(old_open)!=1: raise SystemExit('GitHub redirect handling changed')
+          script=script.replace(old_open,new_open)
+          # Check the patched standalone Python sections before invoking API.
+          import ast
+          blocks=script.split("python - <<'PY'")
+          if len(blocks)!=2: raise SystemExit('Unexpected Python block count')
+          py=blocks[1].split('\nPY\n',1)[0]
+          ast.parse(py)
+          dest=Path('/tmp/jongbe_v892_forward_fix.sh')
+          dest.write_text(script,encoding='utf-8')
+          dest.chmod(0o700)
+          print('Patch validated; starting read-only first-capture workflow')
+          PY
+          bash -n /tmp/jongbe_v892_forward_fix.sh
+          bash /tmp/jongbe_v892_forward_fix.sh
+      - name: Upload immutable forward snapshot and aggregate report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: jongbe-v892-forward-${{ github.run_id }}
+          path: nh-v892/
+          if-no-files-found: warn
+          retention-days: 90
