@@ -1,0 +1,183 @@
+name: Jongbe V8.9.3 strict vs 100-point score research (test only)
+
+on:
+  push:
+    branches: [v8.8.4-test]
+    paths:
+      - '.github/workflows/v893-score-compare-auto.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: jongbe-v893-score-compare
+  cancel-in-progress: false
+
+jobs:
+  score-compare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    env:
+      NHPLUG_APP_KEY: ${{ secrets.NAMUH_APP_KEY }}
+      NHPLUG_APP_SECRET: ${{ secrets.NAMUH_APP_SECRET_KEY }}
+      NHPLUG_BASE_URL: https://api.nhplug.com:8443
+      NHPLUG_AUTH_URL: https://api.nhplug.com:8443
+      NHPLUG_RATE_LIMIT: '2'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Install existing read-only dependencies
+        run: python -m pip install --disable-pip-version-check 'nhplug==0.4.1' 'exchange-calendars>=4.9,<5' pandas 'PyYAML>=6,<7'
+      - name: Compare frozen strict filter with experimental style-specific scores
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > /tmp/jongbe_v893_injection.js <<'JS_INJECTION'
+          // V8.9.3 independent candidate-selection comparison on the same frozen 300-stock sample.
+          // This is an exploratory score: no thresholds fitted to outcomes, and no trade instruction.
+          (function v893ScoreAudit(){
+            const types=['rebound','trend'];
+            const keys=['strict','score60','score75'];
+            const empty=()=>Object.fromEntries(types.map(t=>[t,Object.fromEntries(keys.map(k=>[k,[]]))]));
+            const history={earlier:empty(),later:empty()};
+            const today=Object.fromEntries(types.map(t=>[t,Object.fromEntries(keys.map(k=>[k,0]))]));
+            const scores=[], skipped={};
+            const skip=k=>skipped[k]=(skipped[k]||0)+1;
+            const toNum=x=>Number.isFinite(x)?+x.toFixed(3):null;
+            function classify(b,i){
+              if(i<199)return null;
+              const c=b[i][4],a20=engine.rolling(b.slice(i-19,i+1).map(x=>x[4]),20).at(-1);
+              const a5=engine.rolling(b.slice(i-4,i+1).map(x=>x[4]),5).at(-1);
+              const lows=b.slice(i-19,i+1).map(x=>x[3]);
+              const low=Math.min(...lows),recentLow=Math.min(...b.slice(i-5,i+1).map(x=>x[3]));
+              // Rebound first, so a recovering low isn't re-labeled as trend breakout.
+              if(low>0&&recentLow<=low*1.025&&c<=low*1.14&&c>=low*1.005)return 'rebound';
+              if(Number.isFinite(a20)&&Number.isFinite(a5)&&c>=a20&&a5>=a20)return 'trend';
+              return null;
+            }
+            function assess(b,h,i,type){
+              const c=b[i][4],o=b[i][1],vol=b[i][5],closes=b.slice(0,i+1).map(x=>x[4]);
+              const ma5=engine.rolling(closes,5)[i],ma20=engine.rolling(closes,20)[i];
+              const ma200=engine.rolling(closes,200)[i];
+              const vol20=b.slice(i-20,i).reduce((a,x)=>a+x[5],0)/20;
+              const vr=vol20>0?vol/vol20:null;
+              const dist=ma20>0?c/ma20-1:null;
+              const cur=h[i],prev=h[i-1];
+              const turn=prev.close<prev.open&&cur.close>cur.open;
+              const haBull=cur.close>cur.open;
+              const previousHigh=Math.max(...b.slice(i-20,i).map(x=>x[2]));
+              const priorLow=Math.min(...b.slice(i-20,i).map(x=>x[3]));
+              const priorClose=b[i-1][4];
+              // Hard veto for invalid data and unusually extended/illiquid events.
+              const turnover=c*vol;
+              const veto=![c,o,vol,ma5,ma20,ma200,vr,dist,turnover].every(Number.isFinite)
+                ||c<=0||vol20<=0||turnover<5e9||vr>4||dist>0.15||dist< -0.15;
+              let score=0;
+              // Five components, each at most 20 points; separate, predeclared style rules.
+              score+=haBull? (turn?20:12):0;
+              score+=vr>=1.3&&vr<=2.5?20:vr>=1.0&&vr<=3?12:vr>=.7&&vr<=3?5:0;
+              score+=c>=ma5?20:c>=ma5*.985?10:0;
+              if(type==='trend'){
+                score+=ma5>=ma20&&c>=ma20?20:c>=ma20?10:0;
+                score+=c>previousHigh?20:c>=ma200&&c>=priorClose?12:c>priorClose?6:0;
+              }else{
+                const low20=Math.min(...b.slice(i-19,i+1).map(x=>x[3]));
+                const hold=c>=low20*1.015;
+                score+=c>=ma20?20:c>=ma20*.97?12:hold?6:0;
+                score+=turn&&c>priorClose?20:c>priorClose&&c>=o?12:c>priorLow*1.03?6:0;
+              }
+              return {score:Math.min(100,score),veto,haTurn:turn,vr:toNum(vr),turnover_valid:turnover>=5e9};
+            }
+            for(const stock of data){
+              try{
+                const b=stock.bars;
+                if(b.length<242){skip('under_242');continue;}
+                const h=heikin(b),start=b.length-41;
+                for(let i=start;i<b.length;i++){
+                  const type=classify(b,i);
+                  if(!type){if(i===b.length-1)skip('latest_unclassified');continue;}
+                  const flags=assess(b,h,i,type);
+                  if(flags.veto){if(i===b.length-1)skip('latest_hard_veto');continue;}
+                  const prefix=b.slice(i-199,i+1);
+                  const r=engine.analyze(prefix);
+                  if(!r.ready){if(i===b.length-1)skip('latest_engine_unready');continue;}
+                  const z=haSignal(b,h,i),strict=z.quality&&riskFilter(prefix,r);
+                  const flagsMap={strict,score60:flags.score>=60,score75:flags.score>=75};
+                  if(i===b.length-1){
+                    scores.push({code:stock.code,type,score:flags.score,flags:flagsMap});
+                    for(const key of keys)if(flagsMap[key])today[type][key]++;
+                  }else{
+                    const net=100*(b[i+1][4]/b[i][4]-1)-.5;
+                    const cohort=i-start<20?'earlier':'later';
+                    for(const key of keys)if(flagsMap[key])history[cohort][type][key].push(net);
+                  }
+                }
+              }catch(err){skip('stock_analysis_error');}
+            }
+            const summarize=a=>({n:a.length,avg_net_pct:a.length?toNum(a.reduce((s,x)=>s+x,0)/a.length):null,
+              win_pct:a.length?toNum(100*a.filter(x=>x>0).length/a.length):null,
+              worst_net_pct:a.length?toNum(Math.min(...a)):null});
+            const past=Object.fromEntries(Object.entries(history).map(([p,byType])=>[p,
+              Object.fromEntries(Object.entries(byType).map(([t,byKey])=>[t,
+                Object.fromEntries(Object.entries(byKey).map(([k,a])=>[k,summarize(a)]))]))]));
+            const top=[...scores].sort((a,b)=>b.score-a.score||a.code.localeCompare(b.code)).slice(0,10)
+              .map(x=>({code:x.code,type:x.type,score:x.score,strict:x.flags.strict}));
+            report.score_comparison_v893={schema:'jongbe-v893-score-comparison-v1',method:'predeclared experimental disjoint rebound / trend 100-point scores',
+              thresholds:{score60:60,score75:75,hard_veto_turnover_krw:5e9,max_volume_ratio:4,max_abs_ma20_gap_pct:15},
+              today,history:past,top10_research_only:top,skipped,
+              baseline:'strict = frozen V8.9 HA quality AND frozen V8.8.9.8 risk filter',
+              warnings:['Retrospective shared 300-stock current universe: NOT independent or forward validation',
+                'Historical events from multiple tickers and dates overlap',
+                'Hypothetical close-to-next-close fill and 0.5 percentage point cost; no executions',
+                'Score rewards heuristics, not calibrated probabilities',
+                'No brokerage raw OHLCV, secrets, or trading orders exported']};
+            const lines=['### V8.9.3 엄격 필터 vs 100점 비교 (연구 전용)',
+              `- 기준일: ${report.target_date} · 분석 ${report.analyzed}/300`,
+              `- 당일 유형별 후보(엄격/60점/75점): ${JSON.stringify(today)}`,
+              `- 과거 전반 20일(종가 익일, 비용 0.5%p): ${JSON.stringify(past.earlier)}`,
+              `- 과거 후반 20일(종가 익일, 비용 0.5%p): ${JSON.stringify(past.later)}`,
+              `- 연구용 상위 10종목 코드/점수: ${JSON.stringify(top)}`,
+              `- 제외 사유 집계: ${JSON.stringify(skipped)}`,
+              '- 기존 V8.9 엄격 필터 보존. 높은 점수는 매수 신호/수익 확률 아님.',
+              '- 독립검증 전, 시장 약세여도 점수 통과 종목은 매수 권고 아님. 운영 사이트·계좌·주문 변경 없음.'];
+            if(process.env.GITHUB_STEP_SUMMARY)fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY,lines.join('\n')+'\n');
+            console.log('V893_AGGREGATE:',JSON.stringify({today,skipped}));
+          })();
+          JS_INJECTION
+          python - <<'PY_SCRIPT'
+          from pathlib import Path
+          import yaml
+          source=Path('.github/workflows/v890-nh-300-heikin-audit.yml')
+          wf=yaml.safe_load(source.read_text(encoding='utf8'))
+          steps=wf['jobs']['heikin-audit']['steps']
+          found=[x for x in steps if x.get('name')=='300-stock HA and prior risk gate (research only)']
+          if len(found)!=1:raise SystemExit('Frozen V8.9 base step missing or changed')
+          script=found[0]['run']
+          # Build interpolation marker at runtime, so Actions does not interpret it in this YAML.
+          expr=chr(36)+chr(123)*2+' github.event_name '+chr(125)*2
+          if script.count(expr)!=1:raise SystemExit('Unexpected original event marker')
+          script=script.replace(expr,'workflow_dispatch')
+          if chr(36)+chr(123)*2 in script:raise SystemExit('Unexpected workflow expression in base script')
+          needle='report.analyzed=analyzed;report.eligible_40_day=eligible;'
+          if script.count(needle)!=1:raise SystemExit('Original score insertion point changed')
+          injected=Path('/tmp/jongbe_v893_injection.js').read_text(encoding='utf8')
+          script=script.replace(needle,needle+'\n'+injected)
+          out=Path('/tmp/jongbe_v893_full_audit.sh')
+          out.write_text(script,encoding='utf8');out.chmod(0o700)
+          PY_SCRIPT
+          bash /tmp/jongbe_v893_full_audit.sh
+      - name: Upload aggregate-only score comparison
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: jongbe-v893-score-compare-${{ github.run_id }}
+          path: nh-v890/summary.json
+          if-no-files-found: warn
+          retention-days: 7
