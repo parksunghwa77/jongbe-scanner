@@ -1,0 +1,4 @@
+V8.9.2 forward-signal snapshot trigger
+Target Korean market session: 2026-11-12
+Run only after 16:30 Asia/Seoul.
+Research-only, no orders, no main branch or Pages changes.
