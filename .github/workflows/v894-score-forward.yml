@@ -1,0 +1,190 @@
+name: Jongbe V8.9.4 frozen score forward test (test only)
+
+on:
+  push:
+    branches: [v8.8.4-test]
+    paths:
+      - '.github/workflows/v894-score-forward.yml'
+      - 'v894-triggers/**'
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: jongbe-v894-forward
+  cancel-in-progress: false
+
+jobs:
+  score-forward:
+    runs-on: ubuntu-latest
+    timeout-minutes: 42
+    env:
+      NHPLUG_APP_KEY: ${{ secrets.NAMUH_APP_KEY }}
+      NHPLUG_APP_SECRET: ${{ secrets.NAMUH_APP_SECRET_KEY }}
+      NHPLUG_BASE_URL: https://api.nhplug.com:8443
+      NHPLUG_AUTH_URL: https://api.nhplug.com:8443
+      NHPLUG_RATE_LIMIT: '2'
+      GH_TOKEN: ${{ github.token }}
+      REPOSITORY: ${{ github.repository }}
+      RUN_ID: ${{ github.run_id }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Install read-only data client, KRX calendar and YAML parser
+        run: python -m pip install --disable-pip-version-check 'nhplug==0.4.1' 'exchange-calendars>=4.9,<5' pandas 'PyYAML>=6,<7'
+      - name: Enforce completed KRX session and retrieve prior frozen artifact
+        id: context
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p nh-v894
+          python - <<'PY'
+          import datetime,json,os,subprocess
+          from pathlib import Path
+          from zoneinfo import ZoneInfo
+          import exchange_calendars as ec
+          import pandas as pd
+          now=datetime.datetime.now(ZoneInfo('Asia/Seoul'))
+          valid={'allow':False,'today':now.date().isoformat(),'previous':None,'recorded_at_kst':now.isoformat(timespec='seconds')}
+          if now.time()<datetime.time(16,30):
+              valid['reason']='BEFORE_1630_KST'
+          else:
+              cal=ec.get_calendar('XKRX')
+              ss=cal.sessions_in_range(pd.Timestamp(now.date()-datetime.timedelta(days=30)),pd.Timestamp(now.date()+datetime.timedelta(days=2)))
+              days=[x.date().isoformat() for x in ss if x.date().isoformat() not in {'2026-06-03','2026-07-17'}]
+              if valid['today'] not in days:valid['reason']='NOT_KRX_TRADING_DAY'
+              else:
+                  valid.update(allow=True,previous=days[days.index(valid['today'])-1],reason='READY')
+          Path('/tmp/v894-context.json').write_text(json.dumps(valid))
+          if not valid['allow']:
+              Path('nh-v894/status.json').write_text(json.dumps(valid,indent=2)+'\n')
+              with open(os.environ['GITHUB_STEP_SUMMARY'],'a') as f:
+                  f.write('### V8.9.4 상태\n- '+valid['reason']+' — 현재 확정 신호 기록 없음\n')
+              with open(os.environ['GITHUB_OUTPUT'],'a') as f:f.write('allow=false\n')
+              raise SystemExit(0)
+          # Enumerate only this workflow's own past artifacts. Never expose token or prices.
+          repo=os.environ['REPOSITORY']
+          items=[]
+          for page in range(1,5):
+              cmd=['gh','api',f'repos/{repo}/actions/artifacts','-f','per_page=100','-f',f'page={page}','--method','GET']
+              result=subprocess.run(cmd,capture_output=True,text=True,check=True)
+              a=json.loads(result.stdout).get('artifacts',[])
+              if not a:break
+              items.extend(a)
+          candidates=[]
+          for a in items:
+              if a.get('expired') or not a.get('name','').startswith('jongbe-v894-score-forward-'):continue
+              run=a.get('workflow_run') or {}
+              if run.get('head_branch')!='v8.8.4-test' or str(run.get('id'))==os.environ['RUN_ID']:continue
+              created=datetime.datetime.fromisoformat(a['created_at'].replace('Z','+00:00')).astimezone(ZoneInfo('Asia/Seoul')).date().isoformat()
+              if created==valid['previous']:candidates.append(a)
+          if candidates:
+              a=min(candidates,key=lambda x:x['created_at'])
+              dest=Path('/tmp/v894-prior');dest.mkdir(exist_ok=True)
+              subprocess.run(['gh','run','download',str(a['workflow_run']['id']),'--repo',repo,'--name',a['name'],'--dir',str(dest)],check=True)
+              path=dest/'v894-snapshot.json'
+              if not path.exists():raise RuntimeError('Prior-day artifact lacks frozen snapshot; refusing silent replacement')
+              s=json.loads(path.read_text())
+              if (s.get('schema')!='jongbe-v894-forward-snapshot-v1' or s.get('session')!=valid['previous'] or s.get('rules')!='v893_frozen_v1'):
+                  raise RuntimeError('Prior-day artifact has incompatible schema/session/rules')
+              Path('/tmp/v894-prev-snapshot.json').write_text(json.dumps(s))
+              valid['prior_found']=True
+          else:
+              valid['prior_found']=False
+          Path('/tmp/v894-context.json').write_text(json.dumps(valid))
+          with open(os.environ['GITHUB_OUTPUT'],'a') as f:f.write('allow=true\n')
+          PY
+      - name: Run frozen V8.9.3 scoring and record today's candidates
+        if: steps.context.outputs.allow == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > /tmp/v894-score-capture.js <<'V894_JS'
+            // V8.9.4: freeze only predeclared V8.9.3 decisions made at today's completed close.
+            const ctx=JSON.parse(fs.readFileSync('/tmp/v894-context.json','utf8'));
+            if(!ctx.allow||report.target_date!==ctx.today)throw Error('Stale or unclosed session: refusing forward snapshot');
+            const ordered=[...scores].sort((a,b)=>a.code.localeCompare(b.code));
+            const frozen={schema:'jongbe-v894-forward-snapshot-v1',session:ctx.today,
+              recorded_at_kst:ctx.recorded_at_kst,rules:'v893_frozen_v1',
+              sample_size:300,analysed:report.analyzed,read_only:true,
+              score_rules:{score60:60,score75:75,strict:'v890_original_ha_and_risk'},
+              candidates:ordered.map(x=>({code:x.code,type:x.type,score:x.score,
+                strict:!!x.flags.strict,score60:!!x.flags.score60,score75:!!x.flags.score75})),
+              note:'Only rule-based category and score metadata; no raw OHLCV or executable prices.'};
+            fs.writeFileSync('nh-v894/v894-snapshot.json',JSON.stringify(frozen,null,2)+'\n');
+            const prevPath='/tmp/v894-prev-snapshot.json';
+            const verification={schema:'jongbe-v894-next-session-verification-v1',
+              session:ctx.today,previous_session:ctx.previous,prior_found:fs.existsSync(prevPath),
+              assumed_round_trip_cost_pct_points:0.5,read_only:true,by_type:{},missing:0};
+            if(verification.prior_found){
+              const prev=JSON.parse(fs.readFileSync(prevPath,'utf8'));
+              const lookup=new Map(data.map(x=>[x.code,x.bars]));
+              const groups={rebound:{},trend:{}};
+              for(const typ of ['rebound','trend'])for(const k of ['strict','score60','score75'])groups[typ][k]=[];
+              for(const x of prev.candidates){
+                const b=lookup.get(x.code);
+                const yesterday=b?.find(z=>z[0]===ctx.previous),todayBar=b?.find(z=>z[0]===ctx.today);
+                if(!yesterday||!todayBar||!(yesterday[4]>0&&todayBar[4]>0)){
+                  verification.missing++;continue;
+                }
+                if(!['rebound','trend'].includes(x.type))continue;
+                const net=100*(todayBar[4]/yesterday[4]-1)-0.5;
+                for(const k of ['strict','score60','score75'])if(x[k]===true)groups[x.type][k].push(net);
+              }
+              for(const type of ['rebound','trend']){
+                verification.by_type[type]={};
+                for(const key of ['strict','score60','score75']){
+                  const vals=groups[type][key];
+                  verification.by_type[type][key]={n:vals.length,
+                    avg_net_pct:vals.length?+(vals.reduce((a,b)=>a+b,0)/vals.length).toFixed(4):null,
+                    win_pct:vals.length?+(100*vals.filter(v=>v>0).length/vals.length).toFixed(2):null,
+                    worst_net_pct:vals.length?+Math.min(...vals).toFixed(4):null};
+                }
+              }
+              fs.writeFileSync('nh-v894/v894-verified.json',JSON.stringify(verification,null,2)+'\n');
+            }
+            const todayCounts={rebound:{strict:0,score60:0,score75:0},trend:{strict:0,score60:0,score75:0}};
+            for(const x of frozen.candidates)for(const k of ['strict','score60','score75'])if(x[k])todayCounts[x.type][k]++;
+            const msg=['### V8.9.4 실제 기록 기반 점수 검증 (실매매 아님)',
+              `- ${ctx.today} 확정 일봉 · 점수 분류 가능 ${frozen.candidates.length} / 분석 ${report.analyzed}/300`,
+              `- 오늘 고정된 유형별 후보: ${JSON.stringify(todayCounts)}`,
+              `- 전 거래일 ${ctx.previous} 저장 기록 발견: ${verification.prior_found}`,
+              verification.prior_found?`- 전일 신호의 오늘 성과(비용 0.5%p 차감): ${JSON.stringify(verification.by_type)}`:'- 기존 기록이 없으므로 오늘은 최초 기준 기록만 저장. 성과는 다음 거래일 확인.',
+              '- 실제 매수 추천·수익률 보장 아님. 기존 V8.9.3 규칙 변경 없음.',
+              '- 테스트 브랜치 전용, 운영 사이트·계좌·주문 변경 없음.'];
+            if(process.env.GITHUB_STEP_SUMMARY)fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY,msg.join('\n')+'\n');
+          V894_JS
+          python - <<'PY'
+          from pathlib import Path
+          import yaml
+          source=Path('.github/workflows/v893-score-compare-auto.yml')
+          doc=yaml.safe_load(source.read_text(encoding='utf8'))
+          steps=doc['jobs']['score-compare']['steps']
+          candidates=[s for s in steps if s.get('name')=='Compare frozen strict filter with experimental style-specific scores']
+          if len(candidates)!=1:raise RuntimeError('Frozen V8.9.3 source changed')
+          original=candidates[0]['run']
+          anchor="            const lines=['### V8.9.3 엄격 필터 vs 100점 비교 (연구 전용)',"
+          if original.count(anchor)!=1:raise RuntimeError('Cannot locate score recording point')
+          injection=Path('/tmp/v894-score-capture.js').read_text()
+          original=original.replace(anchor,injection+'\n'+anchor)
+          output=Path('/tmp/v894-run.sh');output.write_text(original);output.chmod(0o700)
+          PY
+          bash -n /tmp/v894-run.sh
+          bash /tmp/v894-run.sh
+          cp nh-v890/summary.json nh-v894/research-summary.json
+      - name: Upload immutable score record and aggregate verification
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: jongbe-v894-score-forward-${{ github.run_id }}
+          path: nh-v894/
+          if-no-files-found: error
+          retention-days: 90
