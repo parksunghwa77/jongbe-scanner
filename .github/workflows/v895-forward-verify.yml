@@ -1,0 +1,85 @@
+name: Jongbe V8.9.5 verify frozen scores (test only)
+
+on:
+  push:
+    branches: [v8.8.4-test]
+    paths:
+      - '.github/workflows/v895-forward-verify.yml'
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: jongbe-v895-forward-verification
+  cancel-in-progress: false
+
+jobs:
+  verify-frozen:
+    runs-on: ubuntu-latest
+    timeout-minutes: 42
+    env:
+      NHPLUG_APP_KEY: ${{ secrets.NAMUH_APP_KEY }}
+      NHPLUG_APP_SECRET: ${{ secrets.NAMUH_APP_SECRET_KEY }}
+      NHPLUG_BASE_URL: https://api.nhplug.com:8443
+      NHPLUG_AUTH_URL: https://api.nhplug.com:8443
+      NHPLUG_RATE_LIMIT: '2'
+      GH_TOKEN: ${{ github.token }}
+      REPOSITORY: ${{ github.repository }}
+      RUN_ID: ${{ github.run_id }}
+    steps:
+      - name: Checkout test branch
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Install pinned data client and calendar
+        run: python -m pip install --disable-pip-version-check 'nhplug==0.4.1' 'exchange-calendars>=4.9,<5' pandas 'PyYAML>=6,<7'
+      - name: Confirm existing frozen V8.9.4 source is unchanged
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          import yaml
+          p=Path('.github/workflows/v894-score-forward-fixed.yml')
+          d=yaml.safe_load(p.read_text())
+          steps=d['jobs']['score-forward']['steps']
+          expected={
+            'context':'Enforce completed KRX session and retrieve prior frozen artifact',
+            'scoring':"Run frozen V8.9.3 scoring and record today's candidates",
+          }
+          for key,name in expected.items():
+            matched=[s for s in steps if s.get('name')==name and isinstance(s.get('run'),str)]
+            if len(matched)!=1:raise RuntimeError('Source drift: '+name)
+            Path('/tmp/v895-'+key+'.sh').write_text(matched[0]['run']+'\n')
+          PY
+          bash -n /tmp/v895-context.sh
+          bash -n /tmp/v895-scoring.sh
+      - name: Load Nov 12 frozen snapshot and determine session
+        id: context
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash /tmp/v895-context.sh
+      - name: Check next-session outcomes and freeze today
+        if: steps.context.outputs.allow == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash /tmp/v895-scoring.sh
+      - name: Preserve score snapshot and verification aggregates
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: jongbe-v895-next-session-${{ github.run_id }}
+          path: nh-v894/
+          if-no-files-found: error
+          retention-days: 90
