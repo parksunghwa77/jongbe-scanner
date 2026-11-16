@@ -1,0 +1,135 @@
+name: Jongbe V8.9.6 forward results tables (test only)
+
+on:
+  push:
+    branches: [v8.8.4-test]
+    paths:
+      - '.github/workflows/v896-score-tables.yml'
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: jongbe-v896-score-tables
+  cancel-in-progress: false
+
+jobs:
+  score-tables:
+    runs-on: ubuntu-latest
+    timeout-minutes: 42
+    env:
+      NHPLUG_APP_KEY: ${{ secrets.NAMUH_APP_KEY }}
+      NHPLUG_APP_SECRET: ${{ secrets.NAMUH_APP_SECRET_KEY }}
+      NHPLUG_BASE_URL: https://api.nhplug.com:8443
+      NHPLUG_AUTH_URL: https://api.nhplug.com:8443
+      NHPLUG_RATE_LIMIT: '2'
+      GH_TOKEN: ${{ github.token }}
+      REPOSITORY: ${{ github.repository }}
+      RUN_ID: ${{ github.run_id }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Install existing read-only dependencies
+        run: python -m pip install --disable-pip-version-check 'nhplug==0.4.1' 'exchange-calendars>=4.9,<5' pandas 'PyYAML>=6,<7'
+      - name: Prepare original frozen scoring, prior-day artifact and report tables
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PYEX'
+          from pathlib import Path
+          import yaml
+          p=Path('.github/workflows/v895-forward-verify.yml')
+          d=yaml.safe_load(p.read_text(encoding='utf8'))
+          steps=d['jobs']['verify-frozen']['steps']
+          for name,out in [('Load Nov 12 frozen snapshot and determine session','/tmp/v896-context.sh'),('Check next-session outcomes and freeze today','/tmp/v896-scoring.sh')]:
+              found=[x for x in steps if x.get('name')==name]
+              if len(found)!=1: raise RuntimeError('V895 expected step missing: '+name)
+              # The step itself is a wrapper, not the original script. Extract source from v894 as v895 does.
+          p=Path('.github/workflows/v894-score-forward-fixed.yml')
+          d=yaml.safe_load(p.read_text(encoding='utf8'))
+          steps=d['jobs']['score-forward']['steps']
+          for name,out in [('Enforce completed KRX session and retrieve prior frozen artifact','/tmp/v896-context.sh'),('Run frozen V8.9.3 scoring and record today\'s candidates','/tmp/v896-scoring.sh')]:
+              found=[x for x in steps if x.get('name')==name]
+              if len(found)!=1: raise RuntimeError('V894 expected step missing: '+name)
+              Path(out).write_text(found[0]['run']+'\n',encoding='utf8')
+          PYEX
+          cat > /tmp/v896-prior.js <<'JS_PRIOR'
+          const priorRows=prev.candidates.filter(x=>x.score60).map(x=>{
+            const bars=lookup.get(x.code);
+            const a=bars?.find(z=>z[0]===ctx.previous),b=bars?.find(z=>z[0]===ctx.today);
+            const valid=!!(a&&b&&a[4]>0&&b[4]>0);
+            const net=valid?+(100*(b[4]/a[4]-1)-0.5).toFixed(4):null;
+            return {code:x.code,type:x.type,score:x.score,grade:x.score75?'75+':'60+',net_pct:net,result:net===null?'자료없음':net>0?'승':net<0?'패':'보합'};
+          }).sort((a,b)=>b.score-a.score||a.code.localeCompare(b.code));
+          fs.writeFileSync('nh-v894/v896-prior-detail.json',JSON.stringify({session:ctx.today,previous:ctx.previous,rows:priorRows,read_only:true},null,2)+'\n');
+          const fm=v=>v===null?'미확인':(v>0?'+':'')+v.toFixed(2)+'%';
+          const table=['### V8.9.6 전일 후보의 익일 성과표 (연구용)',
+          `- 기준: ${ctx.previous} 확정 신호 → ${ctx.today} 종가 · 비용 0.5%p 차감`,
+          '- 종목명은 원본 데이터에 없어 종목코드로 표시. 실매매 체결 수익률이 아님.',
+          '| 종목코드 | 유형 | 점수 | 등급 | 익일 가정손익 | 판정 |',
+          '|---|---|---:|---|---:|---|',
+          ...priorRows.map(x=>`| ${x.code} | ${x.type==='rebound'?'바닥반등':'추세돌파'} | ${x.score} | ${x.grade} | ${fm(x.net_pct)} | ${x.result} |`),
+          `- 검증 가능 ${priorRows.filter(x=>x.net_pct!==null).length}/${priorRows.length}종목; 누락 ${priorRows.filter(x=>x.net_pct===null).length}종목`];
+          if(process.env.GITHUB_STEP_SUMMARY)fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY,table.join('\n')+'\n\n');
+          const csv=['code,type,score,grade,net_pct,result',...priorRows.map(x=>[x.code,x.type,x.score,x.grade,x.net_pct??'',x.result].join(','))];
+          fs.writeFileSync('nh-v894/v896-prior-detail.csv',csv.join('\n')+'\n');
+          JS_PRIOR
+          cat > /tmp/v896-today.js <<'JS_TODAY'
+          const todayRows=frozen.candidates.filter(x=>x.score60).sort((a,b)=>b.score-a.score||a.code.localeCompare(b.code));
+          const todayTable=['### V8.9.6 오늘 확정된 다음 거래일 관찰 후보',
+          `- 기준일 ${ctx.today} · 60점 이상 ${todayRows.length}종목, 75점 이상 ${todayRows.filter(x=>x.score75).length}종목`,
+          '| 종목코드 | 유형 | 점수 | 등급 |',
+          '|---|---|---:|---|',
+          ...todayRows.map(x=>`| ${x.code} | ${x.type==='rebound'?'바닥반등':'추세돌파'} | ${x.score} | ${x.score75?'75+':'60+'} |`),
+          '- 후보는 매수 추천 아님. 종목명은 원본 기록에 없음.'];
+          if(process.env.GITHUB_STEP_SUMMARY)fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY,todayTable.join('\n')+'\n\n');
+          JS_TODAY
+          python - <<'PYPATCH'
+          from pathlib import Path
+          p=Path('/tmp/v896-context.sh')
+          s=p.read_text()
+          old="not a.get('name','').startswith('jongbe-v894-score-forward-')"
+          new="not a.get('name','').startswith(('jongbe-v894-score-forward-','jongbe-v895-next-session-','jongbe-v896-score-table-'))"
+          if s.count(old)!=1: raise SystemExit('V8.9.5 source drift: cannot patch artifact retrieval')
+          p.write_text(s.replace(old,new))
+          from pathlib import Path
+          p=Path('/tmp/v896-scoring.sh')
+          s=p.read_text()
+          anchor=r"fs.writeFileSync('nh-v894/v894-verified.json',JSON.stringify(verification,null,2)+'\n');"
+          if s.count(anchor)!=1: raise SystemExit('V8.9.5 source drift: verification insertion point')
+          s=s.replace(anchor,Path('/tmp/v896-prior.js').read_text()+'\n'+anchor)
+          anchor2="const msg=['### V8.9.4 실제 기록 기반 점수 검증 (실매매 아님)',"
+          if s.count(anchor2)!=1: raise SystemExit('V8.9.5 source drift: new candidate insertion point')
+          s=s.replace(anchor2,Path('/tmp/v896-today.js').read_text()+'\n'+anchor2)
+          p.write_text(s)
+          PYPATCH
+          bash -n /tmp/v896-context.sh
+          bash -n /tmp/v896-scoring.sh
+      - name: Verify previous trading day and market close
+        id: context
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash /tmp/v896-context.sh
+      - name: Run unchanged score engine and publish readable tables
+        if: steps.context.outputs.allow == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash /tmp/v896-scoring.sh
+      - name: Upload records and CSV tables
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: jongbe-v896-score-table-${{ github.run_id }}
+          path: nh-v894/
+          if-no-files-found: error
+          retention-days: 90
