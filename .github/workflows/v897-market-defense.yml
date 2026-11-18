@@ -1,0 +1,158 @@
+name: Jongbe V8.9.7 market defense research (test only)
+on:
+  push:
+    branches: [v8.8.4-test]
+    paths:
+      - '.github/workflows/v897-market-defense.yml'
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: jongbe-v897-market-defense
+  cancel-in-progress: false
+jobs:
+  market-defense:
+    runs-on: ubuntu-latest
+    timeout-minutes: 42
+    env:
+      NHPLUG_APP_KEY: ${{ secrets.NAMUH_APP_KEY }}
+      NHPLUG_APP_SECRET: ${{ secrets.NAMUH_APP_SECRET_KEY }}
+      NHPLUG_BASE_URL: https://api.nhplug.com:8443
+      NHPLUG_AUTH_URL: https://api.nhplug.com:8443
+      NHPLUG_RATE_LIMIT: '2'
+      GH_TOKEN: ${{ github.token }}
+      REPOSITORY: ${{ github.repository }}
+      RUN_ID: ${{ github.run_id }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Install existing read-only dependencies
+        run: python -m pip install --disable-pip-version-check 'nhplug==0.4.1' 'exchange-calendars>=4.9,<5' pandas 'PyYAML>=6,<7'
+      - name: Prepare unchanged V896 and separate market audit
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          import yaml
+          d=yaml.safe_load(Path('.github/workflows/v896-score-tables-fixed.yml').read_text())
+          steps=d['jobs']['score-tables']['steps']
+          a=[s for s in steps if s.get('name')=='Prepare existing V8.9.6 and select latest complete prior-session artifact']
+          assert len(a)==1
+          Path('/tmp/v897-prepare.sh').write_text(a[0]['run']+'\n')
+          PY
+          bash /tmp/v897-prepare.sh
+          cat > /tmp/v897-audit.js <<'JS'
+          (function marketDefenseAudit(){
+            const mean=a=>a.length?a.reduce((s,x)=>s+x,0)/a.length:null;
+            const round=x=>Number.isFinite(x)?+x.toFixed(4):null;
+            const fmt=x=>Number.isFinite(x)?x.toFixed(2)+'%':'미확인';
+            const daily=(stock,date)=>{
+              const b=stock.bars,i=b.findIndex(x=>x[0]===date);
+              if(i<19)return null;
+              const prices=b.slice(i-19,i+1).map(x=>x[4]);
+              if(!prices.every(x=>Number.isFinite(x)&&x>0))return null;
+              return {above:b[i][4]>mean(prices)};
+            };
+            const breadth=date=>{
+              const a=data.map(s=>daily(s,date)).filter(Boolean);
+              const above=a.filter(x=>x.above).length;
+              const ratio=a.length?above/a.length:null;
+              return {n:a.length,above,pct:ratio===null?null:round(100*ratio),regime:a.length<200?'미확인':ratio<=.4?'약세':ratio>=.6?'강세':'혼조'};
+            };
+            const priorBreadth=breadth(ctx.previous),todayBreadth=breadth(ctx.today);
+            const peers={KOSPI:[],KOSDAQ:[]};
+            const lookup=new Map(data.map(s=>[s.code,s]));
+            const returns=s=>{
+              const a=s?.bars.find(x=>x[0]===ctx.previous),b=s?.bars.find(x=>x[0]===ctx.today);
+              if(!a||!b||![a[4],b[4]].every(x=>Number.isFinite(x)&&x>0))return null;
+              return {gross:100*(b[4]/a[4]-1),openNet:Number.isFinite(b[1])&&b[1]>0?100*(b[4]/b[1]-1)-.5:null};
+            };
+            for(const s of data){const r=returns(s);if(r&&peers[s.market])peers[s.market].push(r.gross);}
+            const benchmarks=Object.fromEntries(Object.entries(peers).map(([k,v])=>[k,{n:v.length,gross_mean:v.length>=50?round(mean(v)):null}]));
+            let rows=[];
+            const priorPath='/tmp/v894-prev-snapshot.json';
+            if(fs.existsSync(priorPath)){
+              const p=JSON.parse(fs.readFileSync(priorPath,'utf8'));
+              rows=p.candidates.filter(x=>x.score60).map(x=>{
+                const s=lookup.get(x.code),r=returns(s),benchmark=benchmarks[s?.market]?.gross_mean??null;
+                return {code:x.code,type:x.type,score:x.score,score75:!!x.score75,market:s?.market??null,close_net:r?round(r.gross-.5):null,open_net:r?round(r.openNet):null,gross_excess:r&&benchmark!==null?round(r.gross-benchmark):null};
+              }).sort((a,b)=>b.score-a.score||a.code.localeCompare(b.code));
+            }
+            const summarize=(rr,key)=>{const a=rr.map(x=>x[key]).filter(Number.isFinite);return {n:a.length,mean:round(mean(a)),win_pct:a.length?round(100*a.filter(x=>x>0).length/a.length):null,worst:a.length?round(Math.min(...a)):null};};
+            const groups={score60:rows,score75:rows.filter(x=>x.score75)};
+            const stats=Object.fromEntries(Object.entries(groups).map(([k,v])=>[k,{close:summarize(v,'close_net'),open:summarize(v,'open_net'),excess:summarize(v,'gross_excess')} ]));
+            // Signal-day observations only; the next-day regime is never used to decide prior trades.
+            const saved=fs.existsSync(priorPath)?JSON.parse(fs.readFileSync(priorPath,'utf8')).market_defense_v897:null;
+            const validSaved=saved?.session===ctx.previous&&saved?.rule==='ma20_breadth_40_60_min200_v1'&&['약세','혼조','강세','미확인'].includes(saved?.regime);
+            const gateRegime=validSaved?saved.regime:priorBreadth.regime;
+            const gate=gateRegime==='약세'?'관망':gateRegime==='미확인'?'판정불가':'기존 후보 유지';
+            const result={session:ctx.today,previous:ctx.previous,prior_found:fs.existsSync(priorPath),prior_breadth:priorBreadth,today_breadth:todayBreadth,benchmark_kind:'equal-weight sampled stocks, not official indices',benchmarks,gate,gate_basis:validSaved?'frozen signal-day breadth':'reconstructed research only',stats,rows,cash_return_assumption:0};
+            frozen.market_defense_v897={session:ctx.today,rule:'ma20_breadth_40_60_min200_v1',...todayBreadth};
+            fs.writeFileSync('nh-v894/v894-snapshot.json',JSON.stringify(frozen,null,2)+'\n');
+            fs.writeFileSync('nh-v894/v897-market-defense.json',JSON.stringify(result,null,2)+'\n');
+            const lines=['### V8.9.7 시장 환경 및 관망 비교 (연구 전용)',`- ${ctx.previous} 신호 → ${ctx.today} 성과`, `- 표본 20일선 위 비율: 전일 ${fmt(priorBreadth.pct)} (${priorBreadth.regime}) / 오늘 ${fmt(todayBreadth.pct)} (${todayBreadth.regime})`, `- 관망 규칙: 20일선 위 비율 40% 이하, 최소 200종목. 이번 판정: ${gate} (${validSaved?'전일 저장 기준':'사후 재구성 참고용'})`, '- 공식 코스피·코스닥 지수 아님: 시장별 동일가중 표본 비교. 종가·시가 전략 모두 비용 0.5%p 가정.',`- 코스피 표본 ${benchmarks.KOSPI.n}개 평균 ${fmt(benchmarks.KOSPI.gross_mean)} / 코스닥 표본 ${benchmarks.KOSDAQ.n}개 평균 ${fmt(benchmarks.KOSDAQ.gross_mean)}`,'','| 기준 | 종가→익일종가 | 익일시가→종가 | 표본 대비 초과 (비용 전) |','|---|---:|---:|---:|',...Object.entries(stats).map(([k,v])=>`| ${k==='score60'?'60점+':'75점+'} | ${fmt(v.close.mean)} (${v.close.n}) | ${fmt(v.open.mean)} (${v.open.n}) | ${fmt(v.excess.mean)} (${v.excess.n}) |`),'', '| 종목코드 | 점수 | 종가 전략 | 익일 시가 전략 | 표본 초과 |','|---|---:|---:|---:|---:|',...rows.map(x=>`| ${x.code} | ${x.score} | ${fmt(x.close_net)} | ${fmt(x.open_net)} | ${fmt(x.gross_excess)} |`),'', `- 관망 비교: ${gate==='관망'?'현금 0% 가정과 기존 후보 성과 비교':gate==='판정불가'?'비교 보류':'기존 후보 유지'}. 실제 매수·체결 아님.`, '- 전일 시장 환경을 저장하지 않은 경우 사후 재구성이므로 독립적인 전진 검증으로 간주하지 않음. 기존 점수·위험 규칙 변경 없음.'];
+            if(process.env.GITHUB_STEP_SUMMARY)fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY,lines.join('\n')+'\n\n');
+          })();
+          JS
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('/tmp/v896-scoring.sh')
+          s=p.read_text()
+          anchor="const msg=['### V8.9.4 실제 기록 기반 점수 검증 (실매매 아님)',"
+          assert s.count(anchor)==1
+          p.write_text(s.replace(anchor,Path('/tmp/v897-audit.js').read_text()+'\n'+anchor))
+          p=Path('/tmp/v896-context.sh')
+          s=p.read_text()
+          # Only add our own artifact family; keep original V896 snapshots discoverable.
+          old="'jongbe-v896-score-table-'"
+          assert s.count(old)==1
+          s=s.replace(old,old+",'jongbe-v897-market-defense-'")
+          # Prefer the first valid recorded snapshot rather than an empty or later rerun.
+          start=s.index('    if candidates:') if '    if candidates:' in s else s.index('if candidates:')
+          # Source uses top-level Python indentation; match the exact selection block.
+          a=s.index('if candidates:')
+          b=s.index("Path('/tmp/v894-context.json').write_text(json.dumps(valid))",a)
+          replacement='''valid['prior_found']=False
+          for a in sorted(candidates,key=lambda x:x['created_at']):
+              import tempfile
+              with tempfile.TemporaryDirectory() as dest:
+                  subprocess.run(['gh','run','download',str(a['workflow_run']['id']),'--repo',repo,'--name',a['name'],'--dir',dest],check=True)
+                  path=Path(dest)/'v894-snapshot.json'
+                  if not path.exists():continue
+                  recorded=json.loads(path.read_text())
+                  if recorded.get('schema')!='jongbe-v894-forward-snapshot-v1' or recorded.get('session')!=valid['previous'] or recorded.get('rules')!='v893_frozen_v1':continue
+                  if not isinstance(recorded.get('candidates'),list):continue
+                  Path('/tmp/v894-prev-snapshot.json').write_text(json.dumps(recorded))
+                  valid['prior_found']=True
+                  break
+          '''
+          s=s[:a]+replacement+s[b:]
+          p.write_text(s)
+          PY
+          node --check /tmp/v897-audit.js
+          bash -n /tmp/v896-context.sh
+          bash -n /tmp/v896-scoring.sh
+      - name: Verify completed session and original prior snapshot
+        id: context
+        shell: bash
+        run: bash /tmp/v896-context.sh
+      - name: Run original rules and market comparison
+        if: steps.context.outputs.allow == 'true'
+        shell: bash
+        run: bash /tmp/v896-scoring.sh
+      - name: Preserve results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: jongbe-v897-market-defense-${{ github.run_id }}
+          path: nh-v894/
+          if-no-files-found: warn
+          retention-days: 90
