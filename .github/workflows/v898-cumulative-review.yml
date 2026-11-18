@@ -1,0 +1,111 @@
+name: Jongbe V8.9.8 cumulative review (test only)
+on:
+  push:
+    branches: [v8.8.4-test]
+    paths: ['.github/workflows/v898-cumulative-review.yml']
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: jongbe-v898-review
+  cancel-in-progress: false
+jobs:
+  cumulative-review:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPOSITORY: ${{ github.repository }}
+    steps:
+      - name: Collect saved forward results only
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p review
+          python - <<'PY'
+          import json, os, subprocess, tempfile, math, statistics
+          from pathlib import Path
+          repo=os.environ['REPOSITORY']
+          prefixes=('jongbe-v894-score-forward-','jongbe-v895-next-session-','jongbe-v896-score-table-','jongbe-v897-market-defense-')
+          def gh(*args):
+              return subprocess.check_output(['gh',*args],text=True)
+          def number(v):
+              return isinstance(v,(int,float)) and not isinstance(v,bool) and math.isfinite(v)
+          def load(p):
+              return json.loads(p.read_text()) if p.is_file() else None
+          def fmt(v):
+              return f'{v:+.2f}%' if number(v) else '미확인'
+          def agg(rows,key):
+              values=[r[key] for r in rows if number(r.get(key))]
+              return dict(n=len(values),mean=statistics.mean(values) if values else None,wins=sum(v>0 for v in values),worst=min(values) if values else None)
+          arts=[]
+          for page in range(1,11):
+              batch=json.loads(gh('api',f'repos/{repo}/actions/artifacts?per_page=100&page={page}'))['artifacts']
+              arts.extend(batch)
+              if len(batch)<100: break
+          else:
+              raise RuntimeError('Artifact listing exceeds safety pagination limit')
+          days={}; markets={}; skipped=0
+          for a in sorted(arts,key=lambda x:x['created_at']):
+              run=a.get('workflow_run') or {}
+              if a.get('expired') or not a['name'].startswith(prefixes) or run.get('head_branch')!='v8.8.4-test': continue
+              with tempfile.TemporaryDirectory() as dest:
+                  gh('run','download',str(run['id']),'--repo',repo,'--name',a['name'],'--dir',dest)
+                  p=Path(dest)
+                  v=load(p/'v894-verified.json'); s=load(p/'v894-snapshot.json'); m=load(p/'v897-market-defense.json')
+                  if not v or not s or not v.get('prior_found'): skipped+=1; continue
+                  day=v.get('session'); prev=v.get('previous_session')
+                  if not day or not prev or day<'2026-11-13' or s.get('session')!=day or s.get('rules')!='v893_frozen_v1' or v.get('schema')!='jongbe-v894-next-session-verification-v1' or v.get('assumed_round_trip_cost_pct_points')!=0.5: skipped+=1; continue
+                  if not all(k in v.get('by_type',{}) for k in ('rebound','trend')): skipped+=1; continue
+                  days.setdefault(day,v)
+                  if m and m.get('session')==day and m.get('previous')==prev and m.get('prior_found') and m.get('rows'):
+                      # Prefer earliest market report; never double count re-runs.
+                      markets.setdefault(day,m)
+          def cohort(v,key):
+              groups=[v['by_type'][t][key] for t in ('rebound','trend')]
+              n=sum(g['n'] for g in groups)
+              total=sum(g['n']*g['avg_net_pct'] for g in groups if g['n'])
+              wins=sum(round(g['n']*g['win_pct']/100) for g in groups if g['n'])
+              worst=min((g['worst_net_pct'] for g in groups if g['n']),default=None)
+              return dict(n=n,total=total,wins=wins,worst=worst,mean=total/n if n else None)
+          def combine(xs):
+              n=sum(x['n'] for x in xs); total=sum(x['total'] for x in xs)
+              return dict(n=n,mean=total/n if n else None,wins=sum(x['wins'] for x in xs),worst=min((x['worst'] for x in xs if number(x['worst'])),default=None))
+          def wr(x): return f"{100*x['wins']/x['n']:.1f}%" if x['n'] else '미확인'
+          lines=['## V8.9.8 누적 성과 (연구용, 실매매 아님)','',f'- 검증 결과가 저장된 날짜: {len(days)}/20 (목표, 연속 거래일 여부 미검증)','- 2026-11-13 이후 날짜별 최초 유효 기록만 집계. 같은 날 재실행은 중복 제외.','- 거래비용 0.5%p 차감. 60점 이상은 75점 이상을 포함. 종가 가정은 실제 체결 아님.','', '| 검증일 | 60점+ 건수 | 평균 | 승률 | 75점+ 건수 | 평균 | 승률 |','|---|---:|---:|---:|---:|---:|---:|']
+          all60=[]; all75=[]; lower=[]; series=[]; streak=0; maxstreak=0; equity=1.; peak=1.; mdd=0.
+          for day,v in sorted(days.items()):
+              a,b=cohort(v,'score60'),cohort(v,'score75'); all60.append(a); all75.append(b)
+              lo=dict(n=a['n']-b['n'],total=a['total']-b['total'],wins=a['wins']-b['wins'],worst=None); lower.append(lo)
+              lines.append(f"| {day} | {a['n']} | {fmt(a['mean'])} | {wr(a)} | {b['n']} | {fmt(b['mean'])} | {wr(b)} |")
+              if a['n']:
+                  equity*=1+a['mean']/100; peak=max(peak,equity); mdd=min(mdd,100*(equity/peak-1)); streak=streak+1 if a['mean']<0 else 0; maxstreak=max(maxstreak,streak)
+                  series.append(day)
+              else: streak=0
+          lines += ['', '| 점수 구간 | 신호 건수 | 평균 손익 | 승률 | 최악 단일 손익 |','|---|---:|---:|---:|---:|']
+          for label,items in [('60점 이상',all60),('60~74점',lower),('75점 이상',all75)]:
+              x=combine(items); lines.append(f"| {label} | {x['n']} | {fmt(x['mean'])} | {wr(x)} | {fmt(x['worst'])} |")
+          lines += ['', '- 60~74점의 최악 단일 손익은 기존 집계만으로 복원할 수 없어 미확인으로 표시.', f'- 관측된 신호일 동일가중 가상 전략 최대 낙폭: {mdd:.2f}% / 연속 손실 관측일: {maxstreak} (누락일 제외, 계좌 수익률 아님).' if series else '- 낙폭 계산 자료 없음.', '', '### 시장 환경 및 매수 시점 비교 (V8.9.7 기록만)', '', '| 검증일 | 관망 판정 근거 | 판정 | 종가 전략 | 익일 시가 전략 | 관망 적용 종가 전략 |','|---|---|---|---:|---:|---:|']
+          market_rows=[]; buckets={}
+          for day,m in sorted(markets.items()):
+              basis='사전 저장' if m.get('gate_basis')=='frozen signal-day breadth' else '사후 재구성'
+              rows=m['rows']; paired=[r for r in rows if number(r.get('close_net')) and number(r.get('open_net'))]
+              a=agg(paired,'close_net'); b=agg(paired,'open_net'); gate=m.get('gate'); defense=0. if gate=='관망' and a['n'] else a['mean'] if gate=='기존 후보 유지' else None
+              lines.append(f"| {day} | {basis} | {gate} | {fmt(a['mean'])} | {fmt(b['mean'])} | {fmt(defense)} |")
+              regime=m.get('prior_breadth',{}).get('regime','미확인') if basis=='사후 재구성' else ('약세' if gate=='관망' else '비약세' if gate=='기존 후보 유지' else '미확인')
+              market_rows.append(dict(day=day,basis=basis,regime=regime,gate=gate,close=a['mean'],open=b['mean'],defense=defense,n=a['n']))
+              buckets.setdefault((basis,regime),[]).extend(paired)
+          lines += ['', '| 시장/근거 | 신호 건수 | 종가 평균 | 시가 평균 |','|---|---:|---:|---:|']
+          for (basis,regime),rows in sorted(buckets.items()):
+              a,b=agg(rows,'close_net'),agg(rows,'open_net');lines.append(f"| {basis} / {regime} | {a['n']} | {fmt(a['mean'])} | {fmt(b['mean'])} |")
+          lines += ['', '- 시장 자료와 시가 자료가 없는 이전 날짜는 이 비교에서 제외. 종가·시가 모두 확인된 동일 후보만 비교.', '- 사후 재구성은 사전 저장 검증과 분리. 관망 수익률은 현금 0% 가정이며 공식 지수 비교가 아님.', '- 기존 점수 규칙, 운영 사이트, 계좌, 주문 변경 없음. 수익성 입증 전 연구용.', f'- 유효 성과 없는 저장물 제외: {skipped}개.']
+          summary='\n'.join(lines)+'\n'
+          Path('review/summary.md').write_text(summary,encoding='utf8')
+          Path('review/cumulative.json').write_text(json.dumps({'days':sorted(days),'score60':combine(all60),'score75':combine(all75),'score60_to74':combine(lower),'market_daily':market_rows},ensure_ascii=False,indent=2),encoding='utf8')
+          with open(os.environ['GITHUB_STEP_SUMMARY'],'a',encoding='utf8') as f:f.write(summary)
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: jongbe-v898-cumulative-${{ github.run_id }}
+          path: review/
+          retention-days: 90
