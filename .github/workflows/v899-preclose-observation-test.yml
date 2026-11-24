@@ -1,0 +1,121 @@
+name: Jongbe V8.9.9 pre-close observation PILOT (test only)
+
+# TEST BRANCH: push-triggered trial. GitHub's scheduled workflows run only on default branch.
+# No account/order APIs, no repository writes, no GitHub Pages publish.
+on:
+  push:
+    branches: [v8.8.4-test]
+    paths:
+      - '.github/workflows/v899-preclose-observation-test.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: jongbe-v899-preclose-pilot
+  cancel-in-progress: false
+
+jobs:
+  preclose-observation:
+    runs-on: ubuntu-latest
+    timeout-minutes: 16
+    env:
+      NHPLUG_APP_KEY: ${{ secrets.NAMUH_APP_KEY }}
+      NHPLUG_APP_SECRET: ${{ secrets.NAMUH_APP_SECRET_KEY }}
+      NHPLUG_BASE_URL: https://api.nhplug.com:8443
+      NHPLUG_AUTH_URL: https://api.nhplug.com:8443
+      NHPLUG_RATE_LIMIT: '2'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install read-only SDK and exchange calendar
+        run: python -m pip install --disable-pip-version-check 'nhplug==0.4.1' 'exchange-calendars>=4.9,<5'
+      - name: Sample pre-close data (observation only; not V8.9 100-point scoring)
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p v899-observation
+          python - <<'PY'
+          import json, os, re, time
+          from datetime import datetime
+          from pathlib import Path
+          from zoneinfo import ZoneInfo
+          import exchange_calendars as ec
+
+          KST=ZoneInfo('Asia/Seoul')
+          now=datetime.now(KST)
+          record={'schema':'jongbe-v899-preclose-pilot-v1','date':now.date().isoformat(),
+                  'started_kst':now.isoformat(timespec='seconds'),
+                  'phase':'not_checked','read_only':True,'orders_sent':False,
+                  'uses_frozen_v893_score':False,'preclose_100point_validated':False}
+          def save(summary):
+              Path('v899-observation/status.json').write_text(json.dumps(record,ensure_ascii=False,indent=2)+'\n',encoding='utf8')
+              with open(os.environ['GITHUB_STEP_SUMMARY'],'a',encoding='utf8') as f:f.write(summary+'\n')
+
+          if not ec.get_calendar('XKRX').is_session(now.date().isoformat()):
+              record['phase']='not_session';save('### V8.9.9 장중 관찰\n- 휴장일: 검색하지 않음');raise SystemExit(0)
+          minutes=now.hour*60+now.minute
+          # Allow an initial daytime pilot; do not allow it to masquerade as a 15:15 final signal.
+          if not (9*60 <= minutes < 15*60+15):
+              record['phase']='outside_preclose_window'
+              save('### V8.9.9 장중 관찰\n- 09:00~15:14 KST 이외: 장중 검색하지 않음')
+              raise SystemExit(0)
+          if not (os.environ.get('NHPLUG_APP_KEY') and os.environ.get('NHPLUG_APP_SECRET')):
+              raise RuntimeError('NHPLUG API secret missing (no value printed)')
+
+          from nhplug import call
+          codes=['005930','000660','009150','042700','403870','240810','095610',
+                 '084110','200670','035420','006400','105560']
+          # Adds prior watchlist names only, not guaranteed current-session signals.
+          try:
+              obj=json.loads(Path('v6-scores.json').read_text(encoding='utf8'))
+              for row in obj.get('rows',[]):
+                  code=str(row.get('code',''))
+                  if re.fullmatch(r'\d{6}',code) and code not in codes:codes.append(code)
+                  if len(codes)>=30:break
+          except (OSError,ValueError,TypeError,AttributeError):pass
+          codes=codes[:30]
+          good=[]; bad=[]
+          for code in codes:
+              if datetime.now(KST).hour*60+datetime.now(KST).minute >= 15*60+15:
+                  record['cutoff_reached']=True
+                  break
+              try:
+                  res=call('/krstock/quote/v1/currentPrice',{'iem_cd':code,'market_cd':'UNT'})
+                  v=res.get('Output_0') if isinstance(res,dict) else None
+                  if isinstance(v,list):v=v[0] if v else None
+                  raw=v.get('stck_prpr') if isinstance(v,dict) else None
+                  if raw is None or not re.fullmatch(r'\d+(?:\.\d+)?',str(raw)) or float(raw)<=0:
+                      bad.append(code);continue
+                  good.append({'code':code,'retrieved_kst':datetime.now(KST).isoformat(timespec='seconds')})
+              except Exception:
+                  bad.append(code)
+              time.sleep(0.6)
+          record.update(phase='preclose_observation',universe_count=len(codes),
+                        success_count=len(good),failed_count=len(bad),
+                        observed_codes=good,failed_codes=bad,
+                        completed_kst=datetime.now(KST).isoformat(timespec='seconds'))
+          lines=['### V8.9.9 장중 관찰 시험판 (매매 신호 아님)',
+                 f'- 조회 시작: {record["started_kst"]}',
+                 f'- 조회 완료: {record["completed_kst"]}',
+                 f'- 조회 성공 {len(good)}/{len(codes)}, 실패 {len(bad)}',
+                 '- 현재가 응답 유효성만 점검. 종가 확정 데이터·V8.9의 100점 점수·관망 규칙은 이 결과에 적용하지 않음.',
+                 '- UNT 현재가 요청이며 KRX 종가/체결 시각은 보장하지 않음.',
+                 '- 공개 실행 로그·업로드 파일에 원시 가격, 거래량, 인증키, 주문/계좌 정보 없음.',
+                 '- 이 시험판의 push 실행은 자동 14:30 예약 실행이 아님. 정시 실행은 main 반영 후 별도 검증 필요.',
+                 '| 확인 코드 | 조회 시각(KST) |','|---|---|',
+                 *[f'| {x["code"]} | {x["retrieved_kst"][11:19]} |' for x in good]]
+          save('\n'.join(lines))
+          PY
+      - name: Preserve metadata only
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: jongbe-v899-preclose-metadata-${{ github.run_id }}
+          path: v899-observation/status.json
+          if-no-files-found: warn
+          retention-days: 14
