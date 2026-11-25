@@ -1,0 +1,206 @@
+name: Jongbe V9.0 provisional intraday scoring PILOT (test only)
+
+# Push-only trial on test branch. Schedules work only on the default branch.
+# Read-only: no brokerage account, order endpoint, repository writes, or Pages publish.
+on:
+  push:
+    branches: [v8.8.4-test]
+    paths:
+      - '.github/workflows/v900-intraday-score-pilot.yml'
+permissions:
+  contents: read
+concurrency:
+  group: jongbe-v900-intraday-score-pilot
+  cancel-in-progress: false
+jobs:
+  intraday-score-pilot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 16
+    env:
+      NHPLUG_APP_KEY: ${{ secrets.NAMUH_APP_KEY }}
+      NHPLUG_APP_SECRET: ${{ secrets.NAMUH_APP_SECRET_KEY }}
+      NHPLUG_BASE_URL: https://api.nhplug.com:8443
+      NHPLUG_AUTH_URL: https://api.nhplug.com:8443
+      NHPLUG_RATE_LIMIT: '2'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install read-only NH client and KRX calendar
+        run: python -m pip install --disable-pip-version-check 'nhplug==0.4.1' 'exchange-calendars>=4.9,<5' pandas
+      - name: Validate research score algorithm and observe only during market hours
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > /tmp/v900_preclose.py <<'PY_V900'
+          """V9.0 intraday provisional 100 point pilot; no orders, no raw price publication."""
+          import json, os, re, time, math, statistics
+          from datetime import datetime, date
+          from pathlib import Path
+          from zoneinfo import ZoneInfo
+          
+          KST=ZoneInfo('Asia/Seoul')
+          OUT=Path('v900-pilot')
+          OUT.mkdir(exist_ok=True)
+          BASE=['005930','000660','009150','042700','403870','240810','095610','084110','200670','035420','006400','105560']
+          
+          def n(value, positive=False):
+              if value is None or isinstance(value,bool):return None
+              s=str(value).replace(',','').strip()
+              if not re.fullmatch(r'\d{1,15}(?:\.\d{1,6})?',s):return None
+              v=float(s)
+              return v if math.isfinite(v) and (v>0 if positive else v>=0) else None
+          
+          def parse_date(v):
+              for fmt in ('%y/%m/%d','%Y-%m-%d','%Y%m%d','%Y/%m/%d','%y%m%d'):
+                  try:
+                      d=datetime.strptime(str(v or '').strip(),fmt).date()
+                      if date(2020,1,1)<=d<=date(2032,12,31):return d.isoformat()
+                  except ValueError:pass
+              return None
+          
+          def daily_history(resp, today):
+              src=resp.get('Output_0') if isinstance(resp,dict) else None
+              if isinstance(src,dict):src=[src]
+              if not isinstance(src,list):return []
+              values={};conflict=False
+              for x in src:
+                  if not isinstance(x,dict):continue
+                  d=parse_date(x.get('bsop_date'))
+                  if not d or d>=today:continue
+                  o=n(x.get('stck_oprc'),True); h=n(x.get('stck_hgpr'),True)
+                  l=n(x.get('stck_lwpr'),True); c=n(x.get('stck_clpr'),True); v=n(x.get('acml_vol'))
+                  if None in (o,h,l,c,v) or not l<=min(o,c)<=max(o,c)<=h:continue
+                  bar=[d,o,h,l,c,v]
+                  if d in values and values[d]!=bar:conflict=True
+                  values[d]=bar
+              if conflict:return []
+              return [values[d] for d in sorted(values)]
+          
+          def provisional_bar(resp,today):
+              src=resp.get('Output_0') if isinstance(resp,dict) else None
+              if isinstance(src,list):src=src[0] if src else None
+              if not isinstance(src,dict):return None
+              o=n(src.get('stck_oprc'),True);h=n(src.get('stck_hgpr'),True)
+              l=n(src.get('stck_lwpr'),True);c=n(src.get('stck_prpr'),True);v=n(src.get('acml_vol'))
+              if None in (o,h,l,c,v) or not l<=min(o,c)<=max(o,c)<=h:return None
+              return [today,o,h,l,c,v]
+          
+          def heikin(b):
+              result=[]
+              for x in b:
+                  close=(x[1]+x[2]+x[3]+x[4])/4
+                  op=(result[-1][0]+result[-1][1])/2 if result else (x[1]+x[4])/2
+                  result.append((op,close))
+              return result
+          
+          def score(b):
+              """Same V8.9.3 five components but last daily bar is provisional intraday."""
+              if len(b)<221:return None,'HISTORY_LT_220'
+              i=len(b)-1
+              c,o,vol=b[i][4],b[i][1],b[i][5]
+              closes=[x[4] for x in b]
+              ma5=statistics.mean(closes[-5:]); ma20=statistics.mean(closes[-20:]); ma200=statistics.mean(closes[-200:])
+              low=min(x[3] for x in b[-20:]);recent_low=min(x[3] for x in b[-6:])
+              # Score type uses original V8.9.3 rebound-first classification.
+              if low>0 and recent_low<=low*1.025 and c<=low*1.14 and c>=low*1.005: typ='rebound'
+              elif c>=ma20 and ma5>=ma20:typ='trend'
+              else:return None,'UNCLASSIFIED'
+              vol20=statistics.mean(x[5] for x in b[-21:-1]);vr=vol/vol20 if vol20>0 else None
+              dist=c/ma20-1 if ma20>0 else None
+              turnover=c*vol
+              if vr is None or dist is None or not all(map(math.isfinite,[c,o,vol,ma5,ma20,ma200,vr,dist,turnover])) or c<=0 or vol20<=0 or turnover<5e9 or vr>4 or abs(dist)>0.15:
+                  return None,'HARD_VETO'
+              h=heikin(b); cur,prev=h[-1],h[-2]
+              turn=prev[1]<prev[0] and cur[1]>cur[0]
+              ha_bull=cur[1]>cur[0]
+              previous_high=max(x[2] for x in b[-21:-1]);prior_low=min(x[3] for x in b[-21:-1]);prior_close=b[-2][4]
+              points=0
+              points+=20 if turn else 12 if ha_bull else 0
+              points+=20 if 1.3<=vr<=2.5 else 12 if 1<=vr<=3 else 5 if .7<=vr<=3 else 0
+              points+=20 if c>=ma5 else 10 if c>=ma5*.985 else 0
+              if typ=='trend':
+                  points+=20 if ma5>=ma20 and c>=ma20 else 10 if c>=ma20 else 0
+                  points+=20 if c>previous_high else 12 if c>=ma200 and c>=prior_close else 6 if c>prior_close else 0
+              else:
+                  hold=c>=low*1.015
+                  points+=20 if c>=ma20 else 12 if c>=ma20*.97 else 6 if hold else 0
+                  points+=20 if turn and c>prior_close else 12 if c>prior_close and c>=o else 6 if c>prior_low*1.03 else 0
+              return {'type':typ,'score':min(100,points),'score60':points>=60,'score75':points>=75},None
+          
+          def codes():
+              result=list(BASE)
+              try:
+                  obj=json.loads(Path('v6-scores.json').read_text(encoding='utf8'))
+                  for item in obj.get('rows',[]):
+                      c=str(item.get('code',''))
+                      if re.fullmatch(r'\d{6}',c) and c not in result:result.append(c)
+                      if len(result)>=30:break
+              except (OSError,ValueError,TypeError,AttributeError):pass
+              return result[:30]
+          
+          def write_report(out,lines):
+              (OUT/'status.json').write_text(json.dumps(out,ensure_ascii=False,indent=2)+'\n',encoding='utf8')
+              with open(os.environ.get('GITHUB_STEP_SUMMARY','/tmp/v900-summary.md'),'a',encoding='utf8') as f:f.write('\n'.join(lines)+'\n')
+          
+          def main():
+              now=datetime.now(KST);d=now.date().isoformat(); minute=now.hour*60+now.minute
+              report={'schema':'jongbe-v900-provisional-score-pilot-v1','session':d,'started_kst':now.isoformat(timespec='seconds'),'read_only':True,'trade_orders':False,'operating_site_changed':False,'status':'not_run','score_rule':'v893_components_intraday_provisional','market_gate':'UNAVAILABLE_300_STOCK_BREADTH_NOT_MEASURED','trade_decision':'OBSERVE_ONLY'}
+              import exchange_calendars as ec
+              if not ec.get_calendar('XKRX').is_session(d):
+                  report['status']='not_krx_session';write_report(report,['### V9.0 장중 점수 시험판','- 휴장일: 실시간 점수 산출 없음']);return
+              if not (9*60<=minute<15*60+15):
+                  report['status']='out_of_window';write_report(report,['### V9.0 장중 점수 시험판','- 09:00~15:14 KST 밖에서 실행: 시세 조회 없음','- 운영 사이트 및 주문 영향 없음']);return
+              if not (os.getenv('NHPLUG_APP_KEY') and os.getenv('NHPLUG_APP_SECRET')):raise RuntimeError('NHPLUG API keys absent')
+              from nhplug import call
+              seen=[];rejected={};success=0
+              for code in codes():
+                  t=datetime.now(KST)
+                  if t.hour*60+t.minute>=15*60+15:
+                      report['cutoff_reached']=True;break
+                  try:
+                      hist=daily_history(call('/krstock/quote/v1/currentDaily',{'market_cd':'KRX','iem_cd':code,'array_cnt':'260','view_main_yn':'Y'}),d)
+                      bar=provisional_bar(call('/krstock/quote/v1/currentPrice',{'iem_cd':code,'market_cd':'UNT'}),d)
+                      if bar is None or len(hist)<220 or (datetime.fromisoformat(hist[-1][0]).date()-date.fromisoformat(d)).days<-7:
+                          rejected['DATA_MISSING_OR_STALE']=rejected.get('DATA_MISSING_OR_STALE',0)+1;continue
+                      success+=1
+                      result,why=score(hist+[bar])
+                      if why:rejected[why]=rejected.get(why,0)+1
+                      else:seen.append({'code':code,'type':result['type'],'score':result['score'],'retrieved_kst':datetime.now(KST).isoformat(timespec='seconds')})
+                  except Exception:
+                      rejected['API_OR_PARSE_ERROR']=rejected.get('API_OR_PARSE_ERROR',0)+1
+                  time.sleep(.6)
+              seen.sort(key=lambda x:(-x['score'],x['code']))
+              end=datetime.now(KST)
+              report.update(status='provisional_observation_only',completed_kst=end.isoformat(timespec='seconds'),universe_size=len(codes()),usable_daily_and_current=success,scored=len(seen),rejections=rejected,candidates=seen)
+              lines=['### V9.0 장중 잠정 100점 관찰 (매수 신호 아님)',f'- 조회: {report["started_kst"]} → {report["completed_kst"]}',f'- 대상 {len(codes())}종목 / 시세 확보 {success} / 잠정 점수 {len(seen)}',f'- 제외/자료 오류: {json.dumps(rejected,ensure_ascii=False)}','- 점수 구성은 V8.9.3 규칙과 동일하나 마지막 봉은 UNT 장중 잠정 데이터. 확정 종가 점수와 동일하지 않음.','- 시장 관망 판정: 판정불가 (30종목 표본으로 300종목 시장 breadth 검증 불가).', '- 정규장 KRX 일봉과 UNT 현재가의 데이터 출처가 달라 시각/장 일치 미검증.','- 조회시각은 서버 현재가 체결시각이 아님. 실제 매매·주문 없음.','- 공개 결과에 가격·거래량·인증정보 없음.', '| 종목코드 | 유형 | 잠정점수 | 조회시각(KST) |','|---|---|---:|---|']
+              lines += [f'| {r["code"]} | {"바닥반등" if r["type"]=="rebound" else "추세돌파"} | {r["score"]} | {r["retrieved_kst"][11:19]} |' for r in seen[:20]]
+              write_report(report,lines)
+          
+          def selftest():
+              assert parse_date('26/11/24')=='2026-11-24'
+              assert n('-1') is None
+              assert provisional_bar({'Output_0':{'stck_oprc':'100','stck_hgpr':'105','stck_lwpr':'99','stck_prpr':'103','acml_vol':'1000'}},'2026-11-24')==['2026-11-24',100,105,99,103,1000]
+              assert provisional_bar({'Output_0':{'stck_oprc':'100','stck_hgpr':'101','stck_lwpr':'99','stck_prpr':'103','acml_vol':'1000'}},'2026-11-24') is None
+              bars=[[f'2026-01-{i%28+1:02}',100,110,90,100,10000000] for i in range(225)]
+              got,err=score(bars)
+              assert err in (None,'UNCLASSIFIED','HARD_VETO')
+              print('V900 SELFTEST PASS')
+          
+          if __name__=='__main__':
+              selftest()
+              main()
+          PY_V900
+          python -m py_compile /tmp/v900_preclose.py
+          python /tmp/v900_preclose.py
+      - name: Preserve metadata only
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: jongbe-v900-provisional-metadata-${{ github.run_id }}
+          path: v900-pilot/status.json
+          if-no-files-found: warn
+          retention-days: 30
