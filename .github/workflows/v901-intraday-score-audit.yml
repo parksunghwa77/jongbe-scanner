@@ -1,0 +1,112 @@
+name: Jongbe V9.0.1 intraday scoring offline audit (test only)
+
+# Push test on v8.8.4-test; does not fetch live quotes, modify production, or trade.
+on:
+  push:
+    branches: [v8.8.4-test]
+    paths:
+      - '.github/workflows/v901-intraday-score-audit.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  score-audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Install YAML reader
+        run: python -m pip install --disable-pip-version-check 'PyYAML>=6,<7'
+      - name: Test existing V9.0 scoring without live market data
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p v901-audit
+          python - <<'PY'
+          import ast, json, os, re
+          from pathlib import Path
+          import yaml
+
+          source=Path('.github/workflows/v900-intraday-score-pilot.yml')
+          doc=yaml.safe_load(source.read_text(encoding='utf-8'))
+          steps=doc['jobs']['intraday-score-pilot']['steps']
+          matched=[s for s in steps if s.get('name')=='Validate research score algorithm and observe only during market hours']
+          if len(matched)!=1:
+              raise RuntimeError('Frozen V9.0 source step changed; no silent fallback')
+          script=matched[0]['run']
+          marker="cat > /tmp/v900_preclose.py <<'PY_V900'\n"
+          close='\nPY_V900\n'
+          if script.count(marker)!=1 or script.count(close)!=1:
+              raise RuntimeError('Cannot uniquely locate V9.0 Python code')
+          py=script.split(marker,1)[1].split(close,1)[0]
+          tree=ast.parse(py)
+          functions={n.name for n in tree.body if isinstance(n,ast.FunctionDef)}
+          required={'score','heikin','provisional_bar','daily_history','main','selftest'}
+          if not required.issubset(functions):
+              raise RuntimeError('Required scoring functions changed')
+          # Execute definitions only, never call the script's main() or NHPLUG API.
+          scope={'__name__':'offline_v900_audit'}
+          exec(compile(tree,'v900-intraday-python','exec'),scope)
+          score=scope['score']; provisional_bar=scope['provisional_bar']; heikin=scope['heikin']
+          scope['selftest']()
+
+          tests=[]
+          def check(label,ok):
+              tests.append({'test':label,'passed':bool(ok)})
+              if not ok:raise AssertionError(label)
+
+          def bars(n=240):
+              # Synthetic bars, not exchange quotes; each bar obeys OHLC rules.
+              return [[f'fixture-{i:03}',100.0,105.0,95.0,100.0,100_000_000.0] for i in range(n)]
+
+          b=bars(240)
+          check('history minimum refusal',score(b[:219])[1]=='HISTORY_LT_220')
+          b[-1]=['fixture-239',100.0,112.0,95.0,110.0,100_000_000.0]
+          result,error=score(b)
+          check('trend fixture classified',error is None and result['type']=='trend' and 0<=result['score']<=100)
+          check('threshold flags consistent',result['score60']==(result['score']>=60) and result['score75']==(result['score']>=75))
+
+          highvol=bars(240);highvol[-1]=['fixture-239',100.0,112.0,95.0,110.0,500_000_000.0]
+          check('volume spike hard veto',score(highvol)[1]=='HARD_VETO')
+          illiquid=bars(240);illiquid[-1]=['fixture-239',100.0,112.0,95.0,110.0,100.0]
+          check('low turnover hard veto',score(illiquid)[1]=='HARD_VETO')
+          extended=bars(240);extended[-1]=['fixture-239',100.0,140.0,95.0,130.0,100_000_000.0]
+          check('excessive MA20 gap veto',score(extended)[1]=='HARD_VETO')
+          good_quote={'Output_0':{'stck_oprc':'100','stck_hgpr':'112','stck_lwpr':'95','stck_prpr':'110','acml_vol':'100000000'}}
+          check('valid provisional candle accepted',provisional_bar(good_quote,'2026-11-25') is not None)
+          bad_quote={'Output_0':{'stck_oprc':'100','stck_hgpr':'105','stck_lwpr':'95','stck_prpr':'110','acml_vol':'100000000'}}
+          check('inconsistent provisional OHLC rejected',provisional_bar(bad_quote,'2026-11-25') is None)
+          check('HA recursion length matches',len(heikin(b))==len(b))
+          check('read-only GitHub permissions',doc.get('permissions',{}).get('contents')=='read')
+          check('market breadth explicitly unavailable',"'market_gate':'UNAVAILABLE_300_STOCK_BREADTH_NOT_MEASURED'" in py)
+          check('outside-hours guard present','9*60<=minute<15*60+15' in py)
+
+          output={'schema':'jongbe-v901-offline-audit-v1',
+                  'source':'v900-intraday-score-pilot.yml',
+                  'total':len(tests),'passed':sum(t['passed'] for t in tests),
+                  'tests':tests,'uses_live_quotes':False,'orders':False,
+                  'limitations':['Synthetic fixture checks only; NH current-price response, market-calendar and real scoring not tested',
+                                 'Provisional UNT price and KRX regular-session daily bar may differ',
+                                 '30-stock list cannot establish 300-stock market breadth',
+                                 'No production scheduler enabled on test branch']}
+          Path('v901-audit/report.json').write_text(json.dumps(output,ensure_ascii=False,indent=2)+'\n',encoding='utf-8')
+          lines=['### V9.0.1 장중 점수 오프라인 자체 검증',
+                 f'- 테스트 {output["passed"]}/{output["total"]} 통과',
+                 '- 실제 증권사 API 호출 없음. 합성 봉으로 분류/점수/위험 차단만 검증.',
+                 '- 300종목 시장 강도 판정 불가 상태 유지. 매매 신호 아님.',
+                 '- V9.0·운영 사이트·계좌·주문 변경 없음.',
+                 '| 점검 항목 | 결과 |','|---|---|',
+                 *[f'| {t["test"]} | {"PASS" if t["passed"] else "FAIL"} |' for t in tests]]
+          with open(os.environ['GITHUB_STEP_SUMMARY'],'a',encoding='utf-8') as f:f.write('\n'.join(lines)+'\n')
+          PY
+      - name: Upload non-price test report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: jongbe-v901-offline-score-audit-${{ github.run_id }}
+          path: v901-audit/report.json
+          if-no-files-found: warn
+          retention-days: 30
