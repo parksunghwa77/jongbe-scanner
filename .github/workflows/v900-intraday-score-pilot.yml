@@ -204,3 +204,4 @@ jobs:
           path: v900-pilot/status.json
           if-no-files-found: warn
           retention-days: 30
+          # 2026-11-27 intraday test
